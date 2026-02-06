@@ -1,4 +1,4 @@
-#include "tauv_common/depth_converter.h"
+#include "tauv_core/depth_converter.h"
 
 DepthConverter::DepthConverter(std::string prefix) : Node("depth_converter"), prefix_(prefix) {
     sub_ = create_subscription<

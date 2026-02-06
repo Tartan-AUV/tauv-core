@@ -4,7 +4,7 @@ ekf_filter_node:
         # The frequency, in Hz, at which the filter will output a position estimate. Note that the filter will not begin
         # computation until it receives at least one message from one of the inputs. It will then run continuously at the
         # frequency specified here, regardless of whether it receives more measurements. Defaults to 30 if unspecified.
-        frequency: 100.0
+        frequency: 1.0
 
         # The period, in seconds, after which we consider a sensor to have timed out. In this event, we carry out a predict
         # cycle on the EKF without correcting it. This parameter can be thought of as the minimum frequency with which the
@@ -22,7 +22,7 @@ ekf_filter_node:
         # unspecified.
         transform_time_offset: 0.0
 
-        # Use this parameter to provide specify how long the tf listener should wait for a transform to become available. 
+        # Use this parameter to provide specify how long the tf listener should wait for a transform to become available.
         # Defaults to 0.0 if unspecified.
         transform_timeout: 0.0
 
@@ -33,10 +33,10 @@ ekf_filter_node:
         # Debug settings. Not for the faint of heart. Outputs a ludicrous amount of information to the file specified by
         # debug_out_file. I hope you like matrices! Please note that setting this to true will have strongly deleterious
         # effects on the performance of the node. Defaults to false if unspecified.
-        debug: false
+        debug: true
 
         # Defaults to "robot_localization_debug.txt" if unspecified. Please specify the full path.
-        debug_out_file: /tauv_common/log/robot_localization_debug.txt
+        debug_out_file: src/tauv_core/log/robot_localization_debug.txt
 
         # Whether we'll allow old measurements to cause a re-publication of the updated state
         permit_corrected_publication: false
@@ -112,9 +112,9 @@ ekf_filter_node:
         # odom0_relative: false
 
         # [ADVANCED] Whether to use the starting pose of child_frame_id as the origin of odometry.
-        # Note: this is different from setting odom0_relative to true, as when child_frame is different from 
+        # Note: this is different from setting odom0_relative to true, as when child_frame is different from
         # base_link_frame, the rotation of base_link will be coupled into the translation of child_frame.
-        # Set to true for fusing secondary odometry sources that are rigidly connected to base_link but has a non-zero 
+        # Set to true for fusing secondary odometry sources that are rigidly connected to base_link but has a non-zero
         # offset from base_link.
         # odom0_pose_use_child_frame: false
 
@@ -155,14 +155,14 @@ ekf_filter_node:
         imu0_config: [false, false, false,
                       true,  true,  true,
                       false, false, false,
-                      true,  true,  true,
-                      true,  true,  true]
+                      true, true, true,
+                      true, true, true]
         imu0_differential: false
         imu0_relative: false
         imu0_queue_size: 10
-        imu0_pose_rejection_threshold: 0.8                 # Note the difference in parameter names
-        imu0_twist_rejection_threshold: 0.8                #
-        imu0_linear_acceleration_rejection_threshold: 0.8  #
+        imu0_pose_rejection_threshold: 2.5                 # Note the difference in parameter names
+        imu0_twist_rejection_threshold: 2.5                #
+        imu0_linear_acceleration_rejection_threshold: 3.0  #
 
         # [ADVANCED] Some IMUs automatically remove acceleration due to gravity, and others don't. If yours doesn't, please set
         # this to true, and *make sure* your data conforms to REP-103, specifically, that the data is in ENU frame.
@@ -180,7 +180,7 @@ ekf_filter_node:
         # predicition. Note that if an acceleration measurement for the variable in question is available from one of the
         # inputs, the control term will be ignored.
         # Whether or not we use the control input during predicition. Defaults to false.
-        use_control: true
+        use_control: false
 
         # Whether the input (assumed to be cmd_vel) is a geometry_msgs/Twist or geometry_msgs/TwistStamped message. Defaults to
         # false.
@@ -236,5 +236,19 @@ ekf_filter_node:
         # value (variance) to a large value will result in rapid convergence for initial measurements of the variable in
         # question. Users should take care not to use large values for variables that will not be measured directly. The values
         # are ordered as x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az. Defaults to the diagonal values below
-        # if unspecified. In this example, we specify only the diagonal of the matrix.
-        initial_estimate_covariance: [1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9, 1e-9]
+        # if unspecified. In this example, we specify only the diagonal of the matrix. BAD DOCUMENTATION??? OR FOR JAZZY NOT HUMBLE!!
+        initial_estimate_covariance: [1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                      0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                      0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                      0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                      0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                      0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,
+                                      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,
+                                      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,
+                                      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,
+                                      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,
+                                      0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9]

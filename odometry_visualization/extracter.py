@@ -6,14 +6,14 @@ from nav_msgs.msg import Odometry
 from rclpy.serialization import deserialize_message
 from rosbag2_py import ConverterOptions, SequentialReader, StorageOptions
 
-bag_name = "sim_2026.01.26_03.09.26"
+bag_name = "fix"
 
 bag_path = "./rosbags/" + bag_name
 csv_path = "./formatted_csvs/" + bag_name + ".csv"
 
 # Open bag
 reader = SequentialReader()
-storage_options = StorageOptions(uri=bag_path, storage_id="mcap")
+storage_options = StorageOptions(uri=bag_path, storage_id="sqlite3")
 converter_options = ConverterOptions('', '')
 reader.open(storage_options, converter_options)
 
