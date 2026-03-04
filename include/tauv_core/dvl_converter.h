@@ -1,19 +1,19 @@
 #pragma once
 
-#include <nav_msgs/msg/odometry.hpp>
+#include <geometry_msgs/msg/twist_with_covariance_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
-#include <tauv_msgs/msg/dvl.hpp>
 #include <string>
+#include <dvl_msgs/msg/dvl.hpp>
 
 class DvlConverter : public rclcpp::Node {
-    public:
-        DvlConverter(std::string prefix);
+   public:
+    DvlConverter(std::string prefix);
 
-    private:
-        void dvlCallback(const tauv_msgs::msg::Dvl::SharedPtr msg);
+   private:
+    void dvlCallback(const dvl_msgs::msg::DVL::SharedPtr msg);
 
-        rclcpp::Subscription<tauv_msgs::msg::Dvl>::SharedPtr sub_;
-        rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_;
+    rclcpp::Subscription<dvl_msgs::msg::DVL>::SharedPtr sub_;
+    rclcpp::Publisher<geometry_msgs::msg::TwistWithCovarianceStamped>::SharedPtr pub_;
 
-        std::string prefix_;
+    std::string prefix_;
 };

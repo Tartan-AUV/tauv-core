@@ -1,48 +1,41 @@
 #include "tauv_core/dvl_converter.h"
 
-
 DvlConverter::DvlConverter(std::string prefix) : Node("dvl_converter"), prefix_(prefix) {
     sub_ = create_subscription<
-        tauv_msgs::msg::Dvl>(prefix_ + "/sensors/dvl",
-                             rclcpp::SensorDataQoS(),
-                             std::bind(&DvlConverter::dvlCallback,
-                                       this,
-                                       std::placeholders::_1));
+        dvl_msgs::msg::DVL>("/dvl/data",
+                                         rclcpp::SensorDataQoS(),
+                                         std::bind(&DvlConverter::dvlCallback,
+                                                   this,
+                                                   std::placeholders::_1));
 
-    pub_ = create_publisher<nav_msgs::msg::Odometry>(prefix_ + "/sensors/dvl/odom", 10);
+    pub_ = create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>(prefix_ + "/sensors/dvl", 10);
 }
 
-void DvlConverter::dvlCallback(const tauv_msgs::msg::Dvl::SharedPtr msg) {
-    nav_msgs::msg::Odometry odom;
+void DvlConverter::dvlCallback(const dvl_msgs::msg::DVL::SharedPtr msg) {
+    geometry_msgs::msg::TwistWithCovarianceStamped twist;
 
-    odom.header.stamp = msg->header.stamp;
-    odom.header.frame_id = "odom";
-    odom.child_frame_id = prefix_ + "/body_link";
+    twist.header = msg->header;
+    twist.header.frame_id = "dvl_link";
 
-    // Convert DVL velocities to odometry twist
-    odom.twist.twist.linear.x = msg->linear_velocity.x;
-    odom.twist.twist.linear.y = msg->linear_velocity.y;
-    odom.twist.twist.linear.z = msg->linear_velocity.z;
+    twist.twist.twist.linear.x = msg->velocity.x;
+    twist.twist.twist.linear.y = msg->velocity.y;
+    twist.twist.twist.linear.z = msg->velocity.z;
+    twist.twist.twist.angular.x = 0.0;
+    twist.twist.twist.angular.y = 0.0;
+    twist.twist.twist.angular.z = 0.0;
 
-    odom.pose.pose.orientation.w = 1.0;  // No orientation info from DVL
+    // Twist covariance is a 36-element array. Linear velocities are in the top-left 3x3 block.
+    twist.twist.covariance[0] = msg->covariance[0];
+    twist.twist.covariance[1] = msg->covariance[1];
+    twist.twist.covariance[2] = msg->covariance[2];
+    twist.twist.covariance[6] = msg->covariance[3];
+    twist.twist.covariance[7] = msg->covariance[4];
+    twist.twist.covariance[8] = msg->covariance[5];
+    twist.twist.covariance[12] = msg->covariance[6];
+    twist.twist.covariance[13] = msg->covariance[7];
+    twist.twist.covariance[14] = msg->covariance[8];
 
-    odom.pose.covariance.fill(1e6);
-    odom.twist.covariance.fill(1e6);
-
-    // Convert percent → fraction
-    const double p = msg->linear_velocity_percent_noise * 0.01;
-    const double sigma0 = msg->linear_velocity_stddev_noise;
-
-    const double var_x = std::pow(p * msg->linear_velocity.x, 2) + std::pow(sigma0, 2);
-    const double var_y = std::pow(p * msg->linear_velocity.y, 2) + std::pow(sigma0, 2);
-    const double var_z = std::pow(p * msg->linear_velocity.z, 2) + std::pow(sigma0, 2);
-
-    // Twist covariance indices (row-major 6x6)
-    odom.twist.covariance[0]  = var_x;  // vx
-    odom.twist.covariance[7]  = var_y;  // vy
-    odom.twist.covariance[14] = var_z;  // vz;
-
-    pub_->publish(odom);
+    pub_->publish(twist);
 }
 
 int main(int argc, char** argv) {

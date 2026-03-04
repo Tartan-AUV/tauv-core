@@ -11,6 +11,8 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(tauv_msgs REQUIRED)
+find_package(dvl_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 # depth_converter executable
 add_executable(depth_converter
@@ -24,7 +26,7 @@ target_compile_features(depth_converter PUBLIC c_std_99 cxx_std_20)
 
 ament_target_dependencies(depth_converter
     rclcpp
-    sensor_msgs
+    tauv_msgs
     nav_msgs
 )
 
@@ -40,13 +42,29 @@ target_compile_features(dvl_converter PUBLIC c_std_99 cxx_std_20)
 
 ament_target_dependencies(dvl_converter
     rclcpp
-    tauv_msgs
-    nav_msgs
+    dvl_msgs
+    geometry_msgs
+)
+
+# imu_converter executable
+add_executable(imu_converter
+    src/imu_converter.cpp
+)
+target_include_directories(imu_converter PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
+)
+target_compile_features(imu_converter PUBLIC c_std_99 cxx_std_20)
+
+ament_target_dependencies(imu_converter
+    rclcpp
+    sensor_msgs
 )
 
 install(TARGETS
     depth_converter
     dvl_converter
+    imu_converter
     DESTINATION lib/${PROJECT_NAME}
 )
 
