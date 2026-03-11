@@ -25,6 +25,7 @@ void DvlConverter::dvlCallback(const dvl_msgs::msg::DVL::SharedPtr msg) {
     twist.twist.twist.angular.z = 0.0;
 
     // Twist covariance is a 36-element array. Linear velocities are in the top-left 3x3 block.
+    twist.twist.covariance.fill(1e6);  // Large default covariance for unmeasured variables
     twist.twist.covariance[0] = msg->covariance[0];
     twist.twist.covariance[1] = msg->covariance[1];
     twist.twist.covariance[2] = msg->covariance[2];
