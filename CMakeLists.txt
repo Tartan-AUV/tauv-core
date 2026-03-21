@@ -13,6 +13,7 @@ find_package(nav_msgs REQUIRED)
 find_package(tauv_msgs REQUIRED)
 find_package(dvl_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 
 # depth_converter executable
 add_executable(depth_converter
@@ -61,10 +62,27 @@ ament_target_dependencies(imu_converter
     sensor_msgs
 )
 
+# watchdog executable
+add_executable(watchdog
+    src/watchdog.cpp
+)
+target_include_directories(watchdog PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
+)
+target_compile_features(watchdog PUBLIC c_std_99 cxx_std_20)
+
+ament_target_dependencies(watchdog
+    rclcpp
+    tauv_msgs
+    std_msgs
+)
+
 install(TARGETS
     depth_converter
     dvl_converter
     imu_converter
+    watchdog
     DESTINATION lib/${PROJECT_NAME}
 )
 
