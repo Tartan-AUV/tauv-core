@@ -1,12 +1,17 @@
+/*
+ * The IMUConverter node assigns covariance values to incoming IMU sensor data
+ */
+
 #include "tauv_core/imu_converter.h"
 
 ImuConverter::ImuConverter(std::string prefix) : Node("imu_converter"), prefix_(prefix) {
+    // Subscribe to raw IMU data (orientation, angular velocity, acceleration)
     sub_ = create_subscription<sensor_msgs::msg::Imu>("/imu/data",
                                                       rclcpp::SensorDataQoS(),
                                                       std::bind(&ImuConverter::imuCallback,
                                                                 this,
                                                                 std::placeholders::_1));
-
+    // Publish IMU data with corrected covariance values
     pub_ = create_publisher<sensor_msgs::msg::Imu>(prefix_ + "/sensors/imu_xsens", 10);
 }
 
