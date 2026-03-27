@@ -14,6 +14,7 @@ find_package(tauv_msgs REQUIRED)
 find_package(dvl_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(tf2 REQUIRED)
 
 # depth_converter executable
 add_executable(depth_converter
@@ -76,6 +77,8 @@ ament_target_dependencies(watchdog
     rclcpp
     tauv_msgs
     std_msgs
+    sensor_msgs
+    tf2
 )
 
 install(TARGETS
