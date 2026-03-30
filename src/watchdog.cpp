@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <utility>
 
 // Compile-time expected ESC IDs for watchdog monitoring.
@@ -18,6 +19,7 @@
 #define WATCHDOG_IMU_TOPIC_SUFFIX "/sensors/imu_xsens"
 #define WATCHDOG_SYSTEM_STATE_TOPIC "watchdog/system_state"
 #define WATCHDOG_HEARTBEAT_CHECK_HZ 2.0
+#define WATCHDOG_HEARTBEAT_FREQUENCY_PARAM "heartbeat_frequency_hz"
 #define WATCHDOG_ESC_TIMEOUT_S 1.0
 #define WATCHDOG_STALE_STARTUP_GRACE_S 5.0
 #define WATCHDOG_WARNING_TEMPERATURE_C 70.0
@@ -26,6 +28,18 @@
 #define WATCHDOG_ERROR_ROLL_DEG 45.0
 #define WATCHDOG_ERROR_PITCH_DEG 45.0
 #define WATCHDOG_ERROR_ANGULAR_VELOCITY_RADPS 5.0
+#define WATCHDOG_ESC_TOPIC_PARAM "esc_topic"
+#define WATCHDOG_IMU_TOPIC_PARAM "imu_topic"
+#define WATCHDOG_SYSTEM_STATE_TOPIC_PARAM "system_state_topic"
+#define WATCHDOG_ESC_TIMEOUT_PARAM "esc_timeout_s"
+#define WATCHDOG_STALE_STARTUP_GRACE_PARAM "stale_startup_grace_s"
+#define WATCHDOG_WARNING_TEMPERATURE_PARAM "warning_temperature_c"
+#define WATCHDOG_ERROR_TEMPERATURE_PARAM "error_temperature_c"
+#define WATCHDOG_ERROR_VOLTAGE_PARAM "error_voltage_v"
+#define WATCHDOG_ROLL_THRESHOLD_PARAM "roll_threshold_deg"
+#define WATCHDOG_PITCH_THRESHOLD_PARAM "pitch_threshold_deg"
+#define WATCHDOG_ANGULAR_VELOCITY_THRESHOLD_PARAM "angular_velocity_threshold_radps"
+#define WATCHDOG_EXPECTED_ESC_IDS_PARAM "expected_esc_ids"
 
 // ESC fault bit masks.
 #define ESC_FAULT_OVER_TEMPERATURE (1U << 0)
@@ -48,39 +62,6 @@
 
 using namespace std::chrono_literals;
 
-namespace {
-
-struct EscFaultInfo {
-    bool voltage_fault;
-    bool temperature_fault;
-    const char* description;
-};
-
-/**
- * @brief Classifies ESC telemetry against simple electrical safety thresholds.
- *
- * @param temperature_c ESC temperature in Celsius.
- * @param voltage_v ESC bus voltage in Volts.
- * @return EscFaultInfo Struct containing fault flags and an operator-facing summary.
- */
-EscFaultInfo faultDetect(const double temperature_c, const double voltage_v) {
-    const bool temperature_fault = temperature_c > WATCHDOG_ERROR_TEMPERATURE_C;
-    const bool voltage_fault = voltage_v < WATCHDOG_ERROR_VOLTAGE_V;
-
-    if (temperature_fault && voltage_fault) {
-        return {voltage_fault, temperature_fault, "Over Temperature + Under Voltage"};
-    }
-    if (temperature_fault) {
-        return {voltage_fault, temperature_fault, "Over Temperature"};
-    }
-    if (voltage_fault) {
-        return {voltage_fault, temperature_fault, "Under Voltage"};
-    }
-    return {false, false, "OK"};
-}
-
-}  // namespace
-
 Watchdog::Watchdog(std::string prefix)
     : Node("watchdog"),
       prefix_(std::move(prefix)),
@@ -88,20 +69,92 @@ Watchdog::Watchdog(std::string prefix)
       imu_attitude_fault_(false),
       imu_angular_velocity_fault_(false),
       startup_time_(this->now()) {
-    // Configuration: topics, watchdog timing, and warning thresholds.
-    esc_topic_ = WATCHDOG_ESC_TELEMETRY_TOPIC;
-    imu_topic_ = prefix_ + WATCHDOG_IMU_TOPIC_SUFFIX;
-    system_state_topic_ = WATCHDOG_SYSTEM_STATE_TOPIC;
-    heartbeat_check_hz_ = WATCHDOG_HEARTBEAT_CHECK_HZ;
-    esc_timeout_s_ = WATCHDOG_ESC_TIMEOUT_S;
-    stale_startup_grace_s_ = WATCHDOG_STALE_STARTUP_GRACE_S;
-    warning_temperature_c_ = WATCHDOG_WARNING_TEMPERATURE_C;
-    roll_threshold_deg_ = WATCHDOG_ERROR_ROLL_DEG;
-    pitch_threshold_deg_ = WATCHDOG_ERROR_PITCH_DEG;
-    angular_velocity_threshold_radps_ = WATCHDOG_ERROR_ANGULAR_VELOCITY_RADPS;
+    const auto ensure_positive_param = [this](const char* name, const double value, const double fallback) {
+        if (value > 0.0) {
+            return value;
+        }
+        RCLCPP_WARN(this->get_logger(),
+                    "Invalid %s=%.3f. Falling back to default %.3f.",
+                    name,
+                    value,
+                    fallback);
+        return fallback;
+    };
 
-    // Watchdog identity set: use compile-time ESC ID list.
-    expected_esc_ids_ = std::vector<uint8_t> WATCHDOG_EXPECTED_ESC_IDS;
+    const auto ensure_non_negative_param = [this](const char* name, const double value, const double fallback) {
+        if (value >= 0.0) {
+            return value;
+        }
+        RCLCPP_WARN(this->get_logger(),
+                    "Invalid %s=%.3f. Falling back to default %.3f.",
+                    name,
+                    value,
+                    fallback);
+        return fallback;
+    };
+
+    // Configuration: topics, watchdog timing, and warning thresholds.
+    esc_topic_ = this->declare_parameter<std::string>(
+        WATCHDOG_ESC_TOPIC_PARAM,
+        WATCHDOG_ESC_TELEMETRY_TOPIC);
+    imu_topic_ = this->declare_parameter<std::string>(
+        WATCHDOG_IMU_TOPIC_PARAM,
+        prefix_ + WATCHDOG_IMU_TOPIC_SUFFIX);
+    system_state_topic_ = this->declare_parameter<std::string>(
+        WATCHDOG_SYSTEM_STATE_TOPIC_PARAM,
+        WATCHDOG_SYSTEM_STATE_TOPIC);
+    heartbeat_check_hz_ = ensure_positive_param(
+        WATCHDOG_HEARTBEAT_FREQUENCY_PARAM,
+        this->declare_parameter<double>(WATCHDOG_HEARTBEAT_FREQUENCY_PARAM, WATCHDOG_HEARTBEAT_CHECK_HZ),
+        WATCHDOG_HEARTBEAT_CHECK_HZ);
+    esc_timeout_s_ = ensure_positive_param(
+        WATCHDOG_ESC_TIMEOUT_PARAM,
+        this->declare_parameter<double>(WATCHDOG_ESC_TIMEOUT_PARAM, WATCHDOG_ESC_TIMEOUT_S),
+        WATCHDOG_ESC_TIMEOUT_S);
+    stale_startup_grace_s_ = ensure_non_negative_param(
+        WATCHDOG_STALE_STARTUP_GRACE_PARAM,
+        this->declare_parameter<double>(WATCHDOG_STALE_STARTUP_GRACE_PARAM, WATCHDOG_STALE_STARTUP_GRACE_S),
+        WATCHDOG_STALE_STARTUP_GRACE_S);
+    warning_temperature_c_ = this->declare_parameter<double>(
+        WATCHDOG_WARNING_TEMPERATURE_PARAM,
+        WATCHDOG_WARNING_TEMPERATURE_C);
+    error_temperature_c_ = this->declare_parameter<double>(
+        WATCHDOG_ERROR_TEMPERATURE_PARAM,
+        WATCHDOG_ERROR_TEMPERATURE_C);
+    error_voltage_v_ = this->declare_parameter<double>(
+        WATCHDOG_ERROR_VOLTAGE_PARAM,
+        WATCHDOG_ERROR_VOLTAGE_V);
+    roll_threshold_deg_ = ensure_non_negative_param(
+        WATCHDOG_ROLL_THRESHOLD_PARAM,
+        this->declare_parameter<double>(WATCHDOG_ROLL_THRESHOLD_PARAM, WATCHDOG_ERROR_ROLL_DEG),
+        WATCHDOG_ERROR_ROLL_DEG);
+    pitch_threshold_deg_ = ensure_non_negative_param(
+        WATCHDOG_PITCH_THRESHOLD_PARAM,
+        this->declare_parameter<double>(WATCHDOG_PITCH_THRESHOLD_PARAM, WATCHDOG_ERROR_PITCH_DEG),
+        WATCHDOG_ERROR_PITCH_DEG);
+    angular_velocity_threshold_radps_ = ensure_non_negative_param(
+        WATCHDOG_ANGULAR_VELOCITY_THRESHOLD_PARAM,
+        this->declare_parameter<double>(
+            WATCHDOG_ANGULAR_VELOCITY_THRESHOLD_PARAM,
+            WATCHDOG_ERROR_ANGULAR_VELOCITY_RADPS),
+        WATCHDOG_ERROR_ANGULAR_VELOCITY_RADPS);
+
+    const std::vector<int64_t> default_expected_esc_ids = WATCHDOG_EXPECTED_ESC_IDS;
+    const auto expected_esc_ids_param = this->declare_parameter<std::vector<int64_t>>(
+        WATCHDOG_EXPECTED_ESC_IDS_PARAM,
+        default_expected_esc_ids);
+    expected_esc_ids_.clear();
+    expected_esc_ids_.reserve(expected_esc_ids_param.size());
+    for (const auto esc_id : expected_esc_ids_param) {
+        if (esc_id < 0 || esc_id > std::numeric_limits<uint8_t>::max()) {
+            RCLCPP_WARN(this->get_logger(),
+                        "Ignoring out-of-range ESC id in %s: %ld",
+                        WATCHDOG_EXPECTED_ESC_IDS_PARAM,
+                        esc_id);
+            continue;
+        }
+        expected_esc_ids_.push_back(static_cast<uint8_t>(esc_id));
+    }
 
     esc_sub_ = this->create_subscription<tauv_msgs::msg::EscTelemetry>(
         esc_topic_,
@@ -141,17 +194,27 @@ void Watchdog::escTelemetryCallback(const tauv_msgs::msg::EscTelemetry::SharedPt
         RCLCPP_INFO(this->get_logger(), "ESC %u telemetry stream recovered", msg->id);
     }
 
-    const EscFaultInfo fault_info = faultDetect(msg->temperature, msg->voltage);
-    const bool has_fault = fault_info.temperature_fault || fault_info.voltage_fault;
+    const bool temperature_fault = msg->temperature > error_temperature_c_;
+    const bool voltage_fault = msg->voltage < error_voltage_v_;
+    const bool has_fault = temperature_fault || voltage_fault;
 
     if (has_fault) {
         escs_with_cared_faults_.insert(msg->id);
+        const char* fault_description = "OK";
+        if (temperature_fault && voltage_fault) {
+            fault_description = "Over Temperature + Under Voltage";
+        } else if (temperature_fault) {
+            fault_description = "Over Temperature";
+        } else if (voltage_fault) {
+            fault_description = "Under Voltage";
+        }
+
         RCLCPP_ERROR_THROTTLE(this->get_logger(),
                               *this->get_clock(),
                               2000,
                               "ESC %u faultDetect error: %s",
                               msg->id,
-                              fault_info.description);
+                              fault_description);
 
         // Publish ERROR immediately on detection instead of waiting for the next heartbeat tick.
         system_in_error_ = true;

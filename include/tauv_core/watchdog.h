@@ -85,6 +85,8 @@ class Watchdog : public rclcpp::Node {
     double esc_timeout_s_;
     double stale_startup_grace_s_;
     double warning_temperature_c_;
+    double error_temperature_c_;
+    double error_voltage_v_;
     double roll_threshold_deg_;
     double pitch_threshold_deg_;
     double angular_velocity_threshold_radps_;
