@@ -12,7 +12,7 @@
 #include <utility>
 
 // Compile-time expected ESC IDs for watchdog monitoring.
-#define WATCHDOG_EXPECTED_ESC_IDS {0, 1, 2, 3, 4, 5, 6, 7}
+#define WATCHDOG_EXPECTED_ESC_IDS {100, 101, 102, 103, 104, 105, 106, 107}
 
 // Watchdog configuration constants.
 #define WATCHDOG_ESC_TELEMETRY_TOPIC "esc_telemetry"
@@ -342,10 +342,13 @@ std::vector<uint8_t> Watchdog::monitoredEscIds() const {
 }
 
 void Watchdog::publishSystemState() {
-    const bool has_error =
+    const bool has_error_now =
         !escs_with_cared_faults_.empty() || !stale_esc_ids_.empty() || imu_attitude_fault_ || imu_angular_velocity_fault_;
-    const bool state_changed = has_error != system_in_error_;
-    system_in_error_ = has_error;
+
+    // Once an error is observed, latch watchdog output in ERROR until restart.
+    const bool previous_state = system_in_error_;
+    system_in_error_ = system_in_error_ || has_error_now;
+    const bool state_changed = system_in_error_ != previous_state;
 
     std_msgs::msg::String msg;
     msg.data = system_in_error_ ? "ERROR" : "OK";
