@@ -61,7 +61,8 @@ class Watchdog : public rclcpp::Node {
      * State is ERROR when any monitored ESC has a fault that matches
      * WATCHDOG_INTEREST_FAULT_MASK, when IMU attitude exceeds configured
      * roll/pitch thresholds, or when IMU angular velocity exceeds configured
-     * body-rate thresholds. Otherwise state is OK.
+     * body-rate thresholds. After the first detected error, state remains
+     * latched in ERROR for the rest of the node lifetime.
      */
     void publishSystemState();
 
