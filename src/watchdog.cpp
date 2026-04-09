@@ -15,7 +15,7 @@
 #define WATCHDOG_EXPECTED_ESC_IDS {0, 1, 2, 3, 4, 5, 6, 7}
 
 // Watchdog configuration constants.
-#define WATCHDOG_ESC_TELEMETRY_TOPIC "esc_telemetry"
+#define WATCHDOG_ESC_TELEMETRY_TOPIC "/esc_telemetry"
 #define WATCHDOG_IMU_TOPIC_SUFFIX "/sensors/imu_xsens"
 #define WATCHDOG_SYSTEM_STATE_TOPIC "watchdog/system_state"
 #define WATCHDOG_HEARTBEAT_CHECK_HZ 2.0
