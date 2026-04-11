@@ -11,6 +11,7 @@
   <depend>rclcpp</depend>
   <depend>tauv_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>tf2</depend>
   <depend>nav_msgs</depend>
   <depend>dvl_msgs</depend>
 
