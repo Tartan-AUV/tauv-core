@@ -1,22 +1,32 @@
+/*
+ * DvLConverter takes in the dvl measurements to a twist message
+ * This enables DVL velocity data to be used by downstream systems such as state estimators
+ * (e.g., EKF), controllers, and navigation stacks that expect standard ROS message types.
+ */
+
 #include "tauv_core/dvl_converter.h"
 
 DvlConverter::DvlConverter(std::string prefix) : Node("dvl_converter"), prefix_(prefix) {
+    // Creates subscriber
     sub_ = create_subscription<
         dvl_msgs::msg::DVL>("/dvl/data",
                                          rclcpp::SensorDataQoS(),
                                          std::bind(&DvlConverter::dvlCallback,
                                                    this,
                                                    std::placeholders::_1));
-
+    //Creates publish as TwistWithCovarianceStamped
     pub_ = create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>(prefix_ + "/sensors/dvl", 10);
 }
 
 void DvlConverter::dvlCallback(const dvl_msgs::msg::DVL::SharedPtr msg) {
+    // Create twist message to store DVL velocity data
     geometry_msgs::msg::TwistWithCovarianceStamped twist;
 
+    // Preserve timestamp and original header information
     twist.header = msg->header;
     twist.header.frame_id = "dvl_link";
 
+    // Maps dvl measurement into twist message
     twist.twist.twist.linear.x = msg->velocity.x;
     twist.twist.twist.linear.y = msg->velocity.y;
     twist.twist.twist.linear.z = msg->velocity.z;
@@ -36,6 +46,7 @@ void DvlConverter::dvlCallback(const dvl_msgs::msg::DVL::SharedPtr msg) {
     twist.twist.covariance[13] = msg->covariance[7];
     twist.twist.covariance[14] = msg->covariance[8];
 
+    //publishes
     pub_->publish(twist);
 }
 
