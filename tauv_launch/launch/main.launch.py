@@ -14,7 +14,7 @@ def generate_launch_description():
     xsens_params_path = os.path.join(
         get_package_share_directory('xsens_mti_ros2_driver'),
         'param',
-        'xsens_mti_node.yaml'
+        'xsens_main.yaml'
     )
     dronecan_db_path = os.path.join(
         get_package_share_directory('tauv_dronecan'),
