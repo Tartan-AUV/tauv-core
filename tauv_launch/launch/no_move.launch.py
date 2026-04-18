@@ -24,7 +24,7 @@ def generate_launch_description():
     common_ekf_file = common_share_dir / "config" / "ekfFUNNY.yaml"
     
     timestamp = datetime.now().strftime('%Y.%m.%d_%H.%M.%S')
-    bag_path = Path("/tauv-mono/ros_ws/bags") / f"rosbag_osprey_{timestamp}"
+    # bag_path = Path("/tauv-mono/ros_ws/bags") / f"rosbag_osprey_{timestamp}"
 
     watchdog_params = {
         'esc_topic': '/esc_telemetry',
@@ -67,21 +67,21 @@ def generate_launch_description():
             name='kvh_node',
             output='screen',
         ),
-        Node(
-            package='tauv_dronecan',
-            executable='can_driver',
-            name='dronecan',
-            output='screen',
-            parameters=[{
-                'interface': 'can1',
-                'node_id': 12,
-                'bitrate': 1000000,
-                'esc_count': 8,
-                'command_rate_hz': 100.0,
-                'discovery_time_sec': 15.0,
-                'dna_db_path': dronecan_db_path
-            }]
-        ),
+        # Node(
+        #     package='tauv_dronecan',
+        #     executable='can_driver',
+        #     name='dronecan',
+        #     output='screen',
+        #     parameters=[{
+        #         'interface': 'can1',
+        #         'node_id': 12,
+        #         'bitrate': 1000000,
+        #         'esc_count': 8,
+        #         'command_rate_hz': 100.0,
+        #         'discovery_time_sec': 15.0,
+        #         'dna_db_path': dronecan_db_path
+        #     }]
+        # ),
         Node(
             package='xsens_mti_ros2_driver',
             executable='xsens_mti_node',
@@ -95,7 +95,7 @@ def generate_launch_description():
             name='dvl_a50',
             output='screen',
             parameters=[{'dvl_ip_address': '192.168.8.114',
-                         'acoustic_enabled': True}]
+                         'acoustic_enabled': False}]
         ),
 
         Node(
@@ -104,21 +104,19 @@ def generate_launch_description():
             name='foxglove_bridge',
             parameters=[{'port': 8765, 'address': '0.0.0.0'}]
         ),
-        ExecuteProcess(            
-            cmd=['ros2', 'bag', 'record', '-a', '-s', 'mcap', '-o', str(bag_path)],
-            output='screen',
-        ),
+        # ExecuteProcess(            
+        #     cmd=['ros2', 'bag', 'record', '-a', '-s', 'mcap', '-o', str(bag_path)],
+        #     output='screen',
+        # ),
         
-        Node(
-            package="tauv_watchdogs",
-            executable="watchdog",
-            name="watchdog",
-            output="screen",
-            parameters=[watchdog_params]
-        ),
+        # Node(
+        #     package="tauv_watchdogs",
+        #     executable="watchdog",
+        #     name="watchdog",
+        #     output="screen",
+        #     parameters=[watchdog_params]
+        # ),
 
-        # Node(package="tauv_repackagers", executable="imu_converter", name="imu_converter", output="screen"),
-        # Node(package="tauv_repackagers", executable="depth_converter", name="depth_converter", output="screen"),
         Node(package="tauv_repackagers", executable="dvl_converter", name="dvl_converter", output="screen"),
 
         Node(
