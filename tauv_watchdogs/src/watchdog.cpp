@@ -40,6 +40,8 @@
 #define WATCHDOG_PITCH_THRESHOLD_PARAM "pitch_threshold_deg"
 #define WATCHDOG_ANGULAR_VELOCITY_THRESHOLD_PARAM "angular_velocity_threshold_radps"
 #define WATCHDOG_EXPECTED_ESC_IDS_PARAM "expected_esc_ids"
+#define WATCHDOG_MISSION_TIMEOUT_S 480.0
+#define WATCHDOG_MISSION_TIMEOUT_PARAM "mission_timeout_s"
 
 // ESC fault bit masks.
 #define ESC_FAULT_OVER_TEMPERATURE (1U << 0)
@@ -68,6 +70,7 @@ Watchdog::Watchdog(std::string prefix)
       system_in_error_(false),
       imu_attitude_fault_(false),
       imu_angular_velocity_fault_(false),
+      mission_timed_out_(false),
       startup_time_(this->now()) {
     const auto ensure_positive_param = [this](const char* name, const double value, const double fallback) {
         if (value > 0.0) {
@@ -138,6 +141,7 @@ Watchdog::Watchdog(std::string prefix)
             WATCHDOG_ANGULAR_VELOCITY_THRESHOLD_PARAM,
             WATCHDOG_ERROR_ANGULAR_VELOCITY_RADPS),
         WATCHDOG_ERROR_ANGULAR_VELOCITY_RADPS);
+    mission_timeout_s_ = this->declare_parameter<double>(WATCHDOG_MISSION_TIMEOUT_PARAM, WATCHDOG_MISSION_TIMEOUT_S);
 
     const std::vector<int64_t> default_expected_esc_ids = WATCHDOG_EXPECTED_ESC_IDS;
     const auto expected_esc_ids_param = this->declare_parameter<std::vector<int64_t>>(
@@ -321,6 +325,16 @@ void Watchdog::heartbeatCheckCallback() {
                             esc_timeout_s_);
             }
         }
+    }
+
+    // Mission timeout: force ERROR once the configured deadline elapses.
+    if (mission_timeout_s_ > 0.0 && !mission_timed_out_ &&
+        (now - startup_time_).seconds() >= mission_timeout_s_) {
+        mission_timed_out_ = true;
+        system_in_error_ = true;
+        RCLCPP_ERROR(this->get_logger(),
+                     "Mission timeout of %.1f s elapsed — watchdog latched to ERROR",
+                     mission_timeout_s_);
     }
 
     // Heartbeat output: publish watchdog state every tick.

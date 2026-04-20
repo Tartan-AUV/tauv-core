@@ -92,8 +92,11 @@ class Watchdog : public rclcpp::Node {
     double pitch_threshold_deg_;
     double angular_velocity_threshold_radps_;
 
+    double mission_timeout_s_;
+
     bool system_in_error_;
     bool imu_attitude_fault_;
     bool imu_angular_velocity_fault_;
+    bool mission_timed_out_;
     rclcpp::Time startup_time_;
 };
