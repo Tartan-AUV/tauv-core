@@ -17,6 +17,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(angles REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
 find_package(diagnostic_updater REQUIRED)
 find_package(geographic_msgs REQUIRED)
@@ -77,26 +78,6 @@ add_library(
 rosidl_get_typesupport_target(cpp_typesupport_target "${PROJECT_NAME}" "rosidl_typesupport_cpp")
 target_link_libraries(${library_name} "${cpp_typesupport_target}")
 
-add_executable(
-  ekf_node
-  src/ekf_node.cpp
-)
-
-add_executable(
-  ukf_node
-  src/ukf_node.cpp
-)
-
-add_executable(
-  navsat_transform_node
-  src/navsat_transform_node.cpp
-)
-
-add_executable(
-  robot_localization_listener_node
-  src/robot_localization_listener_node.cpp
-)
-
 target_link_libraries(
   ${library_name}
   ${GeographicLib_LIBRARIES}
@@ -123,45 +104,23 @@ ament_target_dependencies(
   yaml_cpp_vendor
 )
 
-target_link_libraries(
-  ekf_node
-  ${library_name}
-)
+# Build ekf as a shared library
+add_library(ekf_node SHARED src/ekf_node.cpp)
+target_link_libraries(ekf_node ${library_name})
+ament_target_dependencies(ekf_node rclcpp rclcpp_components)
+rclcpp_components_register_nodes(ekf_node "robot_localization::EkfComponent")
 
-ament_target_dependencies(
-  ekf_node
-  rclcpp
-)
+add_executable(ukf_node src/ukf_node.cpp)
+target_link_libraries(ukf_node ${library_name})
+ament_target_dependencies(ukf_node rclcpp)
 
-target_link_libraries(
-  ukf_node
-  ${library_name}
-)
+add_executable(navsat_transform_node src/navsat_transform_node.cpp)
+target_link_libraries(navsat_transform_node ${library_name})
+ament_target_dependencies(navsat_transform_node rclcpp)
 
-ament_target_dependencies(
-  ukf_node
-  rclcpp
-)
-
-target_link_libraries(
-  navsat_transform_node
-  ${library_name}
-)
-
-ament_target_dependencies(
-  navsat_transform_node
-  rclcpp
-)
-
-target_link_libraries(
-  robot_localization_listener_node
-  ${library_name}
-)
-
-ament_target_dependencies(
-  robot_localization_listener_node
-  rclcpp
-)
+add_executable(robot_localization_listener_node src/robot_localization_listener_node.cpp)
+target_link_libraries(robot_localization_listener_node ${library_name})
+ament_target_dependencies(robot_localization_listener_node rclcpp)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -328,6 +287,8 @@ install(
   ekf_node
   ukf_node
   robot_localization_listener_node
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 

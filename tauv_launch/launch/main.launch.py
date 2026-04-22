@@ -190,7 +190,7 @@ def generate_launch_description():
                     composable_node_descriptions=[
                         ComposableNode(
                             package="robot_localization",
-                            plugin="robot_localization::RosEkf",
+                            plugin="robot_localization::EkfComponent",
                             name="ekf_filter_node",
                             parameters=[str(common_ekf_file)],
                             extra_arguments=[{'use_intra_process_comms': True}]
