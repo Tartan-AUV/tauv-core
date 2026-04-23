@@ -1,6 +1,7 @@
 ### ekf config file ###
 ekf_filter_node:
     ros__parameters:
+        use_sim_time: false 
         # The frequency, in Hz, at which the filter will output a position estimate. Note that the filter will not begin
         # computation until it receives at least one message from one of the inputs. It will then run continuously at the
         # frequency specified here, regardless of whether it receives more measurements. Defaults to 30 if unspecified.
@@ -9,7 +10,7 @@ ekf_filter_node:
         # The period, in seconds, after which we consider a sensor to have timed out. In this event, we carry out a predict
         # cycle on the EKF without correcting it. This parameter can be thought of as the minimum frequency with which the
         # filter will generate new output. Defaults to 1 / frequency if not specified.
-        sensor_timeout: 0.1
+        # sensor_timeout: 0.01
 
         # ekf_localization_node and ukf_localization_node both use a 3D omnidirectional motion model. If this parameter is
         # set to true, no 3D information will be used in your state estimate. Use this if you are operating in a planar
@@ -28,7 +29,7 @@ ekf_filter_node:
 
         # If you're having trouble, try setting this to true, and then echo the /diagnostics_agg topic to see if the node is
         # unhappy with any settings or data.
-        print_diagnostics: true
+        print_diagnostics: false
 
         # Debug settings. Not for the faint of heart. Outputs a ludicrous amount of information to the file specified by
         # debug_out_file. I hope you like matrices! Please note that setting this to true will have strongly deleterious
@@ -42,7 +43,7 @@ ekf_filter_node:
         permit_corrected_publication: false
 
         # Whether to publish the acceleration state. Defaults to false if unspecified.
-        publish_acceleration: false
+        publish_acceleration: true
 
         # Whether to broadcast the transformation over the /tf topic. Defaults to true if unspecified.
         publish_tf: true
@@ -136,8 +137,8 @@ ekf_filter_node:
         odom0_differential: false
         odom0_relative: false
         odom0_queue_size: 1
-        odom0_pose_rejection_threshold: 1.0
-        odom0_twist_rejection_threshold: 0.0
+        # odom0_pose_rejection_threshold: 1.0
+        # odom0_twist_rejection_threshold: 0.0
 
         twist0: os/sensors/dvl
         twist0_config: [false, false, false,
@@ -159,8 +160,8 @@ ekf_filter_node:
         imu0_differential: false
         imu0_relative: true
         imu0_queue_size: 1
-        imu0_pose_rejection_threshold: 2.5
-        imu0_twist_rejection_threshold: 2.5
+        # imu0_pose_rejection_threshold: 2.5
+        # imu0_twist_rejection_threshold: 2.5
         # imu0_linear_acceleration_rejection_threshold: 3.0
 
         # [ADVANCED] Some IMUs automatically remove acceleration due to gravity, and others don't. If yours doesn't, please set
@@ -176,7 +177,7 @@ ekf_filter_node:
         imu1_differential: false
         imu1_relative: true
         imu1_queue_size: 10
-        imu1_twist_rejection_threshold: 2.5
+        # imu1_twist_rejection_threshold: 2.5
 
         # KVH Accelerometer X
         imu2: /os/sensors/fog_kvh/accel_x
@@ -188,7 +189,7 @@ ekf_filter_node:
         imu2_differential: false
         imu2_relative: true
         imu2_queue_size: 5
-        imu2_remove_gravitational_acceleration: true
+        imu2_remove_gravitational_acceleration: false
 
         # KVH Accelerometer Y
         imu3: /os/sensors/fog_kvh/accel_y
@@ -200,7 +201,7 @@ ekf_filter_node:
         imu3_differential: false
         imu3_relative: true
         imu3_queue_size: 5
-        imu3_remove_gravitational_acceleration: true
+        imu3_remove_gravitational_acceleration: false
 
         # KVH Accelerometer Z
         imu4: /os/sensors/fog_kvh/accel_z
@@ -212,7 +213,7 @@ ekf_filter_node:
         imu4_differential: false
         imu4_relative: true
         imu4_queue_size: 5
-        imu4_remove_gravitational_acceleration: true
+        imu4_remove_gravitational_acceleration: false
 
 
         # [ADVANCED]  The EKF and UKF models follow a standard predict/correct cycle. During prediction, if there is no

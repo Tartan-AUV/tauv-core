@@ -32,6 +32,7 @@ def generate_launch_description():
         'imu_topic': 'os/sensors/imu_xsens',
         'system_state_topic': 'watchdog/system_state',
         'heartbeat_frequency_hz': 1.0,
+        'mission_timeout_s':480,
         'esc_timeout_s': 1.0,
         'stale_startup_grace_s': 30.0,
         'warning_temperature_c': 70.0,
@@ -42,24 +43,6 @@ def generate_launch_description():
         'angular_velocity_threshold_radps': 3.0,
         'expected_esc_ids': [100, 101, 102, 103, 104, 105, 106, 107],
     }
-
-    # Container for FOG and EKF nodes to enable intra-process communication
-    sensor_fusion_container = ComposableNodeContainer(
-    name='sensor_fusion_container',
-    namespace='',
-    package='rclcpp_components',
-    executable='component_container',
-    composable_node_descriptions=[
-        ComposableNode(
-            package='tauv_kvh',
-            plugin='tauv_kvh::KvhNode',
-            name='kvh_node',
-            extra_arguments=[{'use_intra_process_comms': True}]
-        ),
-        # EKF removed from here
-    ],
-    output='screen',
-)
 
     # --- Launch Description ---
     return LaunchDescription([
@@ -73,47 +56,61 @@ def generate_launch_description():
         SetEnvironmentVariable('RCUTILS_LOGGING_USE_STDOUT', '1'),
         SetEnvironmentVariable('RCUTILS_LOGGING_BUFFERED_STREAM', '1'),
 
-        # Add the container to the main launch execution
-        sensor_fusion_container,
+        # Container for FOG and EKF nodes to enable intra-process communication
+        ComposableNodeContainer(
+            name='sensor_fusion_container',
+            namespace='',
+            package='rclcpp_components',
+            executable='component_container_mt',
+            composable_node_descriptions=[
+                ComposableNode(
+                    package='tauv_kvh',
+                    plugin='tauv_kvh::KvhNode',
+                    name='kvh_node',
+                    extra_arguments=[{'use_intra_process_comms': True}]
+                ),
+            ],
+            output='screen',
+        ),
 
-        # Node(
-        #     package='tauv_depth',
-        #     executable='depth',
-        #     name='depth_sensor',
-        #     output='screen',
-        #     parameters=[{'i2c_bus': 7}]
-        # ),
+        Node(
+            package='tauv_depth',
+            executable='depth',
+            name='depth_sensor',
+            output='screen',
+            parameters=[{'i2c_bus': 7}]
+        ),
 
-        # Node(
-        #     package='tauv_dronecan',
-        #     executable='can_driver',
-        #     name='dronecan',
-        #     output='screen',
-        #     parameters=[{
-        #         'interface': 'can1',
-        #         'node_id': 12,
-        #         'bitrate': 1000000,
-        #         'esc_count': 8,
-        #         'command_rate_hz': 100.0,
-        #         'discovery_time_sec': 15.0,
-        #         'dna_db_path': dronecan_db_path
-        #     }]
-        # ),
-        # Node(
-        #     package='xsens_mti_ros2_driver',
-        #     executable='xsens_mti_node',
-        #     name='xsens_mti_node',
-        #     output='screen',
-        #     parameters=[xsens_params_path]
-        # ),
-        # Node(
-        #     package='dvl_a50',
-        #     executable='dvl_a50_sensor', 
-        #     name='dvl_a50',
-        #     output='screen',
-        #     parameters=[{'dvl_ip_address': '192.168.8.114',
-        #                  'acoustic_enabled': True}]
-        # ),
+        Node(
+            package='tauv_dronecan',
+            executable='can_driver',
+            name='dronecan',
+            output='screen',
+            parameters=[{
+                'interface': 'can1',
+                'node_id': 12,
+                'bitrate': 1000000,
+                'esc_count': 8,
+                'command_rate_hz': 100.0,
+                'discovery_time_sec': 15.0,
+                'dna_db_path': dronecan_db_path
+            }]
+        ),
+        Node(
+            package='xsens_mti_ros2_driver',
+            executable='xsens_mti_node',
+            name='xsens_mti_node',
+            output='screen',
+            parameters=[xsens_params_path]
+        ),
+        Node(
+            package='dvl_a50',
+            executable='dvl_a50_sensor', 
+            name='dvl_a50',
+            output='screen',
+            parameters=[{'dvl_ip_address': '192.168.8.114',
+                         'acoustic_enabled': True}]
+        ),
 
         Node(
             package='foxglove_bridge',
@@ -143,7 +140,6 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='base_link_to_imu_xsens',
             arguments=['-0.1111', '0.0167',  '0.0469', '3.14159', '0', '0', 'os/base_link', 'imu_link_xsens'],
-            parameters=[{'use_sim_time': True}],
             output='screen'
         ),
         Node(
@@ -151,7 +147,6 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='base_link_to_depth',
             arguments=['-0.1999', '-0.0635', '0.0803', '0', '0', '0', 'os/base_link', 'depth_link'],
-            parameters=[{'use_sim_time': True}],
             output='screen'
         ),
         Node(
@@ -159,15 +154,34 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='base_link_to_dvl',
             arguments=['-0.1408', '0.0000', '0.0100', '-1.5708', '0.0', '3.14159', 'os/base_link', 'dvl_link'],
-            parameters=[{'use_sim_time': True}],
             output='screen'
         ),
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_link_to_imu_fog_gyro',
-            arguments=['0.0618', '0.1', '0.0692', '3.14159', '-1.5708', '0.0', 'os/base_link', 'imu_link_fog_gyro'],
-            parameters=[{'use_sim_time': True}],
+            arguments=['0.06184000', '0.1', '0.06922651', '3.14159', '-1.56605', '0.07700', 'os/base_link', 'imu_link_fog_gyro'],
+            output='screen'
+        ),
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_imu_fog_accel_x',
+            arguments=['0.09534000', '0.12620000', '0.06972651', '3.14159', '-1.56605', '0.07700', 'os/base_link', 'imu_link_fog_accel_x'],
+            output='screen'
+        ),
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_imu_fog_accel_y',
+            arguments=['0.09894000', '0.11169440', '0.04362071', '3.14159', '-1.56605', '0.07700', 'os/base_link', 'imu_link_fog_accel_y'],
+            output='screen'
+        ),
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_imu_fog_accel_z',
+            arguments=['0.10684000', '0.10049400', '0.04352071', '3.14159', '-1.56605', '0.07700', 'os/base_link', 'imu_link_fog_accel_z'],
             output='screen'
         ),
 
