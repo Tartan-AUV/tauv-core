@@ -34,7 +34,7 @@ def generate_launch_description():
         'heartbeat_frequency_hz': 1.0,
         'mission_timeout_s':480,
         'esc_timeout_s': 1.0,
-        'stale_startup_grace_s': 30.0,
+        'stale_startup_grace_s': 5.0,
         'warning_temperature_c': 70.0,
         'error_temperature_c': 90.0,
         'error_voltage_v': 12.0,
@@ -93,7 +93,8 @@ def generate_launch_description():
                 'esc_count': 8,
                 'command_rate_hz': 100.0,
                 'discovery_time_sec': 15.0,
-                'dna_db_path': dronecan_db_path
+                'dna_db_path': dronecan_db_path,
+                'BIGARM':True
             }]
         ),
         Node(
@@ -119,17 +120,24 @@ def generate_launch_description():
             parameters=[{'port': 8765, 'address': '0.0.0.0'}]
         ),
         ExecuteProcess(            
-            cmd=['ros2', 'bag', 'record', '-a', '-s', 'mcap', '-o', str(bag_path)],
+            cmd=['ros2', 'bag', 'record', '-s', 'mcap', '-o', str(bag_path), '--all', '--exclude', '|'.join([
+                '^/oak/rgb/image_raw$',
+                '^/cloud_map$',
+                '^/grid_map$',
+                '^/grid_prob_map$',
+                '^/mapData$',
+                '^/mapGraph$',
+            ])],
             output='screen',
         ),
         
-        # Node(
-        #     package="tauv_watchdogs",
-        #     executable="watchdog",
-        #     name="watchdog",
-        #     output="screen",
-        #     parameters=[watchdog_params]
-        # ),
+        Node(
+            package="tauv_watchdogs",
+            executable="watchdog",
+            name="watchdog",
+            output="screen",
+            parameters=[watchdog_params]
+        ),
 
         # Node(package="tauv_repackagers", executable="imu_converter", name="imu_converter", output="screen"),
         # Node(package="tauv_repackagers", executable="depth_converter", name="depth_converter", output="screen"),
@@ -185,15 +193,15 @@ def generate_launch_description():
             output='screen'
         ),
 
-        # Node(
-        #     package='tauv_controller',
-        #     executable='controller',
-        #     name='controller',
-        #     parameters=[{'tune': LaunchConfiguration('tune')}],
-        #     output='screen',
-        # ),
-        # Node(package='tauv_controller', executable='thruster_forces', name='thruster_forces', output='screen'),
-        # Node(package='tauv_controller', executable='thruster_rpms', name='thruster_rpms', output='screen'),
+        Node(
+            package='tauv_controller',
+            executable='controller',
+            name='controller',
+            parameters=[{'tune': LaunchConfiguration('tune')}],
+            output='screen',
+        ),
+        Node(package='tauv_controller', executable='thruster_forces', name='thruster_forces', output='screen'),
+        Node(package='tauv_controller', executable='thruster_rpms', name='thruster_rpms', output='screen'),
 
         TimerAction(
             period=5.0,
