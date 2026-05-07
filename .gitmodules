@@ -1,0 +1,3 @@
+[submodule "tauv_msgs"]
+	path = tauv_msgs
+	url = https://github.com/Tartan-AUV/tauv-messages.git
