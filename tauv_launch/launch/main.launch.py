@@ -5,10 +5,11 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (DeclareLaunchArgument, ExecuteProcess, LogInfo,
-                            SetEnvironmentVariable, TimerAction)
+                            SetEnvironmentVariable, TimerAction, IncludeLaunchDescription)
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node, ComposableNodeContainer, LoadComposableNodes
 from launch_ros.descriptions import ComposableNode
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 
 def generate_launch_description():
@@ -131,13 +132,13 @@ def generate_launch_description():
             output='screen',
         ),
         
-        Node(
-            package="tauv_watchdogs",
-            executable="watchdog",
-            name="watchdog",
-            output="screen",
-            parameters=[watchdog_params]
-        ),
+        # Node(
+        #     package="tauv_watchdogs",
+        #     executable="watchdog",
+        #     name="watchdog",
+        #     output="screen",
+        #     parameters=[watchdog_params]
+        # ),
 
         # Node(package="tauv_repackagers", executable="imu_converter", name="imu_converter", output="screen"),
         # Node(package="tauv_repackagers", executable="depth_converter", name="depth_converter", output="screen"),
@@ -203,6 +204,20 @@ def generate_launch_description():
         Node(package='tauv_controller', executable='thruster_forces', name='thruster_forces', output='screen'),
         Node(package='tauv_controller', executable='thruster_rpms', name='thruster_rpms', output='screen'),
 
+        Node(
+            package='tauv_trajectory',
+            executable='trajectory_planner',
+            name='trajectory_planner',
+            output='screen',
+        ),
+
+        # Node(
+        #     package='tauv_mission',
+        #     executable='mission_planner',
+        #     name='mission_planner',
+        #     output='screen',
+        # ),
+
         TimerAction(
             period=5.0,
             actions=[
@@ -220,5 +235,11 @@ def generate_launch_description():
                     ]
                 )
             ],
+        ),
+
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(
+                get_package_share_directory('tauv_vision'), 'launch', 'driver_launcher.launch.py'
+            ))
         )
     ])

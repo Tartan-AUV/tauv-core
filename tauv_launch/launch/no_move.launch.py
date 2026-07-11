@@ -5,9 +5,11 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (DeclareLaunchArgument, ExecuteProcess, LogInfo,
-                            SetEnvironmentVariable, TimerAction)
+                            SetEnvironmentVariable, TimerAction, IncludeLaunchDescription)
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
+from launch_ros.actions import Node, ComposableNodeContainer, LoadComposableNodes
+from launch_ros.descriptions import ComposableNode
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 
 def generate_launch_description():
@@ -24,15 +26,16 @@ def generate_launch_description():
     common_ekf_file = common_share_dir / "config" / "ekfFUNNY.yaml"
     
     timestamp = datetime.now().strftime('%Y.%m.%d_%H.%M.%S')
-    # bag_path = Path("/tauv-mono/ros_ws/bags") / f"rosbag_osprey_{timestamp}"
+    bag_path = Path("/tauv-mono/ros_ws/bags") / f"rosbag_osprey_{timestamp}"
 
     watchdog_params = {
         'esc_topic': '/esc_telemetry',
         'imu_topic': 'os/sensors/imu_xsens',
         'system_state_topic': 'watchdog/system_state',
         'heartbeat_frequency_hz': 1.0,
+        'mission_timeout_s':480,
         'esc_timeout_s': 1.0,
-        'stale_startup_grace_s': 30.0,
+        'stale_startup_grace_s': 5.0,
         'warning_temperature_c': 70.0,
         'error_temperature_c': 90.0,
         'error_voltage_v': 12.0,
@@ -54,6 +57,23 @@ def generate_launch_description():
         SetEnvironmentVariable('RCUTILS_LOGGING_USE_STDOUT', '1'),
         SetEnvironmentVariable('RCUTILS_LOGGING_BUFFERED_STREAM', '1'),
 
+        # Container for FOG and EKF nodes to enable intra-process communication
+        ComposableNodeContainer(
+            name='sensor_fusion_container',
+            namespace='',
+            package='rclcpp_components',
+            executable='component_container_mt',
+            composable_node_descriptions=[
+                ComposableNode(
+                    package='tauv_kvh',
+                    plugin='tauv_kvh::KvhNode',
+                    name='kvh_node',
+                    extra_arguments=[{'use_intra_process_comms': True}]
+                ),
+            ],
+            output='screen',
+        ),
+
         Node(
             package='tauv_depth',
             executable='depth',
@@ -61,12 +81,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{'i2c_bus': 7}]
         ),
-        Node(
-            package='tauv_kvh',
-            executable='kvh_node',
-            name='kvh_node',
-            output='screen',
-        ),
+
         # Node(
         #     package='tauv_dronecan',
         #     executable='can_driver',
@@ -79,7 +94,8 @@ def generate_launch_description():
         #         'esc_count': 8,
         #         'command_rate_hz': 100.0,
         #         'discovery_time_sec': 15.0,
-        #         'dna_db_path': dronecan_db_path
+        #         'dna_db_path': dronecan_db_path,
+        #         'BIGARM':True
         #     }]
         # ),
         Node(
@@ -105,7 +121,14 @@ def generate_launch_description():
             parameters=[{'port': 8765, 'address': '0.0.0.0'}]
         ),
         # ExecuteProcess(            
-        #     cmd=['ros2', 'bag', 'record', '-a', '-s', 'mcap', '-o', str(bag_path)],
+        #     cmd=['ros2', 'bag', 'record', '-s', 'mcap', '-o', str(bag_path), '--all', '--exclude', '|'.join([
+        #         '^/oak/rgb/image_raw$',
+        #         '^/cloud_map$',
+        #         '^/grid_map$',
+        #         '^/grid_prob_map$',
+        #         '^/mapData$',
+        #         '^/mapGraph$',
+        #     ])],
         #     output='screen',
         # ),
         
@@ -117,14 +140,15 @@ def generate_launch_description():
         #     parameters=[watchdog_params]
         # ),
 
+        # Node(package="tauv_repackagers", executable="imu_converter", name="imu_converter", output="screen"),
+        # Node(package="tauv_repackagers", executable="depth_converter", name="depth_converter", output="screen"),
         Node(package="tauv_repackagers", executable="dvl_converter", name="dvl_converter", output="screen"),
 
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
-            name='base_link_to_imu',
+            name='base_link_to_imu_xsens',
             arguments=['-0.1111', '0.0167',  '0.0469', '3.14159', '0', '0', 'os/base_link', 'imu_link_xsens'],
-            parameters=[{'use_sim_time': True}],
             output='screen'
         ),
         Node(
@@ -132,15 +156,41 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='base_link_to_depth',
             arguments=['-0.1999', '-0.0635', '0.0803', '0', '0', '0', 'os/base_link', 'depth_link'],
-            parameters=[{'use_sim_time': True}],
             output='screen'
         ),
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_link_to_dvl',
-            arguments=['0.1408', '0.0000', '0.0100', '-1.5708', '0.0', '3.14159', 'os/base_link', 'dvl_link'],
-            parameters=[{'use_sim_time': True}],
+            arguments=['-0.1408', '0.0000', '0.0100', '-1.5708', '0.0', '3.14159', 'os/base_link', 'dvl_link'],
+            output='screen'
+        ),
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_imu_fog_gyro',
+            arguments=['0.06184000', '0.1', '0.06922651', '3.14159', '-1.56605', '0.07700', 'os/base_link', 'imu_link_fog_gyro'],
+            output='screen'
+        ),
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_imu_fog_accel_x',
+            arguments=['0.09534000', '0.12620000', '0.06972651', '3.14159', '-1.56605', '0.07700', 'os/base_link', 'imu_link_fog_accel_x'],
+            output='screen'
+        ),
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_imu_fog_accel_y',
+            arguments=['0.09894000', '0.11169440', '0.04362071', '3.14159', '-1.56605', '0.07700', 'os/base_link', 'imu_link_fog_accel_y'],
+            output='screen'
+        ),
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_imu_fog_accel_z',
+            arguments=['0.10684000', '0.10049400', '0.04352071', '3.14159', '-1.56605', '0.07700', 'os/base_link', 'imu_link_fog_accel_z'],
             output='screen'
         ),
 
@@ -151,21 +201,45 @@ def generate_launch_description():
             parameters=[{'tune': LaunchConfiguration('tune')}],
             output='screen',
         ),
-
         Node(package='tauv_controller', executable='thruster_forces', name='thruster_forces', output='screen'),
         Node(package='tauv_controller', executable='thruster_rpms', name='thruster_rpms', output='screen'),
+
+        Node(
+            package='tauv_trajectory',
+            executable='trajectory_planner',
+            name='trajectory_planner',
+            output='screen',
+        ),
+
+        # Node(
+        #     package='tauv_mission',
+        #     executable='mission_planner',
+        #     name='mission_planner',
+        #     output='screen',
+        # ),
 
         TimerAction(
             period=5.0,
             actions=[
-                LogInfo(msg="Starting EKF filter node!!!!!!"),
-                Node(
-                    package="robot_localization",
-                    executable="ekf_node",
-                    name="ekf_filter_node",
-                    parameters=[str(common_ekf_file)],
-                    output="screen",
-                ),
+                LogInfo(msg="Loading EKF component into container!!!!!!"),
+                LoadComposableNodes(
+                    target_container='sensor_fusion_container',
+                    composable_node_descriptions=[
+                        ComposableNode(
+                            package="robot_localization",
+                            plugin="robot_localization::EkfComponent",
+                            name="ekf_filter_node",
+                            parameters=[str(common_ekf_file)],
+                            extra_arguments=[{'use_intra_process_comms': True}]
+                        )
+                    ]
+                )
             ],
+        ),
+
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(
+                get_package_share_directory('tauv_vision'), 'launch', 'driver_launcher.launch.py'
+            ))
         )
     ])
