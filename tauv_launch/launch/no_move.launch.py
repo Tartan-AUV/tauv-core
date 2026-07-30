@@ -28,6 +28,12 @@ def generate_launch_description():
     timestamp = datetime.now().strftime('%Y.%m.%d_%H.%M.%S')
     bag_path = Path("/tauv-mono/ros_ws/bags") / f"rosbag_osprey_{timestamp}"
 
+    servo_tasks_path = os.path.join(
+        get_package_share_directory('tauv_servo'),
+        'config',
+        'servo_tasks.yaml'
+    )
+
     watchdog_params = {
         'esc_topic': '/esc_telemetry',
         'imu_topic': 'os/sensors/imu_xsens',
@@ -82,6 +88,28 @@ def generate_launch_description():
             parameters=[{'i2c_bus': 7}]
         ),
 
+        Node(
+            package='tauv_servo',
+            executable='servo_driver',
+            name='servo',
+            output='screen',
+            parameters=[{
+                'interface': 'can0',
+                'bitrate': 1000000,
+                'tasks_config': servo_tasks_path,
+                'command_topic': '/servo/task',
+                'status_topic': '/mission/status',
+                'scan_max_id': 4,
+                'torque_limit': 25.0,
+                'position_limit_deg': 150.0,
+                'angle_tolerance': 3.0,
+                'verify_timeout': 3.0,
+                'verify_poll': 0.1,
+                'telem_rate_hz': 1.0,
+                'telem_topic_prefix': '/servo/telem',
+                'startup_task': '',
+            }]
+        ),
         # Node(
         #     package='tauv_dronecan',
         #     executable='can_driver',
@@ -169,28 +197,36 @@ def generate_launch_description():
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_link_to_imu_fog_gyro',
-            arguments=['0.06184000', '0.1', '0.06922651', '3.14159', '-1.56605', '0.07700', 'os/base_link', 'imu_link_fog_gyro'],
+            arguments=['0.06184000', '0.1', '0.06922651',
+                    '0.69843', '0.02752', '0.71476', '-0.02357',
+                    'os/base_link', 'imu_link_fog_gyro'],
             output='screen'
         ),
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_link_to_imu_fog_accel_x',
-            arguments=['0.09534000', '0.12620000', '0.06972651', '3.14159', '-1.56605', '0.07700', 'os/base_link', 'imu_link_fog_accel_x'],
+            arguments=['0.09534000', '0.12620000', '0.06972651',
+                    '0.69843', '0.02752', '0.71476', '-0.02357',
+                    'os/base_link', 'imu_link_fog_accel_x'],
             output='screen'
         ),
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_link_to_imu_fog_accel_y',
-            arguments=['0.09894000', '0.11169440', '0.04362071', '3.14159', '-1.56605', '0.07700', 'os/base_link', 'imu_link_fog_accel_y'],
+            arguments=['0.09894000', '0.11169440', '0.04362071',
+                    '0.69843', '0.02752', '0.71476', '-0.02357',
+                    'os/base_link', 'imu_link_fog_accel_y'],
             output='screen'
         ),
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_link_to_imu_fog_accel_z',
-            arguments=['0.10684000', '0.10049400', '0.04352071', '3.14159', '-1.56605', '0.07700', 'os/base_link', 'imu_link_fog_accel_z'],
+            arguments=['0.10684000', '0.10049400', '0.04352071',
+                    '0.69843', '0.02752', '0.71476', '-0.02357',
+                    'os/base_link', 'imu_link_fog_accel_z'],
             output='screen'
         ),
 
@@ -215,6 +251,7 @@ def generate_launch_description():
         #     package='tauv_mission',
         #     executable='mission_planner',
         #     name='mission_planner',
+        #     parameters=[{'mission_file': 'example_mission.json'}],
         #     output='screen',
         # ),
 

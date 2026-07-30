@@ -27,6 +27,12 @@ def generate_launch_description():
     
     timestamp = datetime.now().strftime('%Y.%m.%d_%H.%M.%S')
     bag_path = Path("/tauv-mono/ros_ws/bags") / f"rosbag_osprey_{timestamp}"
+    
+    servo_tasks_path = os.path.join(
+        get_package_share_directory('tauv_servo'),
+        'config',
+        'servo_tasks.yaml'
+    )
 
     watchdog_params = {
         'esc_topic': '/esc_telemetry',
@@ -81,7 +87,29 @@ def generate_launch_description():
             output='screen',
             parameters=[{'i2c_bus': 7}]
         ),
-
+        
+        Node(
+            package='tauv_servo',
+            executable='servo_driver',
+            name='servo',
+            output='screen',
+            parameters=[{
+                'interface': 'can0',
+                'bitrate': 1000000,
+                'tasks_config': servo_tasks_path,
+                'command_topic': '/servo/task',
+                'status_topic': '/mission/status',
+                'scan_max_id': 4,
+                'torque_limit': 25.0,
+                'position_limit_deg': 150.0,
+                'angle_tolerance': 3.0,
+                'verify_timeout': 3.0,
+                'verify_poll': 0.1,
+                'telem_rate_hz': 1.0,
+                'telem_topic_prefix': '/servo/telem',
+                'startup_task': '',
+            }]
+        ),
         Node(
             package='tauv_dronecan',
             executable='can_driver',
@@ -120,24 +148,24 @@ def generate_launch_description():
             name='foxglove_bridge',
             parameters=[{'port': 8765, 'address': '0.0.0.0'}]
         ),
-        ExecuteProcess(            
-            cmd=['ros2', 'bag', 'record', '-s', 'mcap', '-o', str(bag_path), '--all', '--exclude', '|'.join([
-                '^/oak/rgb/image_raw$',
-                '^/cloud_map$',
-                '^/grid_map$',
-                '^/grid_prob_map$',
-                '^/mapData$',
-                '^/mapGraph$',
-            ])],
-            output='screen',
-        ),
+        # ExecuteProcess(            
+        #     cmd=['ros2', 'bag', 'record', '-s', 'mcap', '-o', str(bag_path), '--all', '--exclude', '|'.join([
+        #         '^/oak/rgb/image_raw$',
+        #         '^/cloud_map$',
+        #         '^/grid_map$',
+        #         '^/grid_prob_map$',
+        #         '^/mapData$',
+        #         '^/mapGraph$',
+        #     ])],
+        #     output='screen',
+        # ),
         
         # Node(
         #     package="tauv_watchdogs",
         #     executable="watchdog",
         #     name="watchdog",
         #     output="screen",
-        #     parameters=[watchdog_params]
+        #     # parameters=[watchdog_params]
         # ),
 
         # Node(package="tauv_repackagers", executable="imu_converter", name="imu_converter", output="screen"),
@@ -211,12 +239,13 @@ def generate_launch_description():
             output='screen',
         ),
 
-        # Node(
-        #     package='tauv_mission',
-        #     executable='mission_planner',
-        #     name='mission_planner',
-        #     output='screen',
-        # ),
+        Node(
+            package='tauv_mission',
+            executable='mission_planner',
+            name='mission_planner',
+            parameters=[{'mission_file': 'D.json'}],
+            output='screen',
+        ),
 
         TimerAction(
             period=5.0,
