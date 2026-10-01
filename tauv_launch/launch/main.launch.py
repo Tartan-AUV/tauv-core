@@ -148,17 +148,17 @@ def generate_launch_description():
             name='foxglove_bridge',
             parameters=[{'port': 8765, 'address': '0.0.0.0'}]
         ),
-        # ExecuteProcess(            
-        #     cmd=['ros2', 'bag', 'record', '-s', 'mcap', '-o', str(bag_path), '--all', '--exclude', '|'.join([
-        #         '^/oak/rgb/image_raw$',
-        #         '^/cloud_map$',
-        #         '^/grid_map$',
-        #         '^/grid_prob_map$',
-        #         '^/mapData$',
-        #         '^/mapGraph$',
-        #     ])],
-        #     output='screen',
-        # ),
+        ExecuteProcess(            
+            cmd=['ros2', 'bag', 'record', '-s', 'mcap', '-o', str(bag_path), '--all', '--exclude', '|'.join([
+                '^/oak/rgb/image_raw$',
+                '^/cloud_map$',
+                '^/grid_map$',
+                '^/grid_prob_map$',
+                '^/mapData$',
+                '^/mapGraph$',
+            ])],
+            output='screen',
+        ),
         
         # Node(
         #     package="tauv_watchdogs",
