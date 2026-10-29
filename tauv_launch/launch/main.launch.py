@@ -74,6 +74,9 @@ def generate_launch_description():
                     package='tauv_kvh',
                     plugin='tauv_kvh::KvhNode',
                     name='kvh_node',
+                    # Average the gyro for 10 s at startup (sub must be still) and subtract it:
+                    # removes the FOG bias + Earth rate. Bench 2026-10-29: heading drift ~0.1 deg/h.
+                    parameters=[{'startup_bias_seconds': 10.0}],
                     extra_arguments=[{'use_intra_process_comms': True}]
                 ),
             ],
