@@ -1,385 +1,366 @@
-#include "tauv_watchdogs/watchdog.h"
-
-#include <tf2/LinearMath/Matrix3x3.h>
-#include <tf2/LinearMath/Quaternion.h>
+// New ROS 2 watchdog implementation based only on the supplied snippet.
+// Requires C++17, rclcpp, sensor_msgs, std_msgs, std_srvs, tauv_msgs.
+// Assumes EscTelemetry contains numeric id, temperature (C), voltage (V).
+// No ESC fault-bit field was provided, so no such field is invented here.
+// Core-only tests: g++ -std=c++17 -Wall -Wextra -Werror
+//   -DWATCHDOG_SELF_TEST watchdog_reset.cpp -o watchdog_test && ./watchdog_test
+// ROS reset: ros2 service call /watchdog/reset std_srvs/srv/Trigger "{}"
+// Reset acknowledges the fault and begins a new mission timer; it does not arm motors.
 
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <cmath>
-#include <functional>
+#include <cstdint>
 #include <limits>
+#include <map>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <string>
 #include <utility>
+#include <vector>
 
-// Compile-time expected ESC IDs for watchdog monitoring.
-#define WATCHDOG_EXPECTED_ESC_IDS {100, 101, 102, 103, 104, 105, 106, 107}
+namespace watchdog {
+using Clock = std::chrono::steady_clock;
+using Time = Clock::time_point;
+inline double age(Time now, Time then) {
+  return std::chrono::duration<double>(now - then).count();
+}
 
-// Watchdog configuration constants.
-#define WATCHDOG_ESC_TELEMETRY_TOPIC "/esc_telemetry"
-#define WATCHDOG_IMU_TOPIC_SUFFIX "/sensors/imu_xsens"
-#define WATCHDOG_SYSTEM_STATE_TOPIC "watchdog/system_state"
-#define WATCHDOG_HEARTBEAT_CHECK_HZ 2.0
-#define WATCHDOG_HEARTBEAT_FREQUENCY_PARAM "heartbeat_frequency_hz"
-#define WATCHDOG_ESC_TIMEOUT_S 10.0
-#define WATCHDOG_STALE_STARTUP_GRACE_S 10.0
-#define WATCHDOG_WARNING_TEMPERATURE_C 70.0
-#define WATCHDOG_ERROR_TEMPERATURE_C 90.0
-#define WATCHDOG_ERROR_VOLTAGE_V 12.0
-#define WATCHDOG_ERROR_ROLL_DEG 45.0
-#define WATCHDOG_ERROR_PITCH_DEG 45.0
-#define WATCHDOG_ERROR_ANGULAR_VELOCITY_RADPS 5.0
-#define WATCHDOG_ESC_TOPIC_PARAM "esc_topic"
-#define WATCHDOG_IMU_TOPIC_PARAM "imu_topic"
-#define WATCHDOG_SYSTEM_STATE_TOPIC_PARAM "system_state_topic"
-#define WATCHDOG_ESC_TIMEOUT_PARAM "esc_timeout_s"
-#define WATCHDOG_STALE_STARTUP_GRACE_PARAM "stale_startup_grace_s"
-#define WATCHDOG_WARNING_TEMPERATURE_PARAM "warning_temperature_c"
-#define WATCHDOG_ERROR_TEMPERATURE_PARAM "error_temperature_c"
-#define WATCHDOG_ERROR_VOLTAGE_PARAM "error_voltage_v"
-#define WATCHDOG_ROLL_THRESHOLD_PARAM "roll_threshold_deg"
-#define WATCHDOG_PITCH_THRESHOLD_PARAM "pitch_threshold_deg"
-#define WATCHDOG_ANGULAR_VELOCITY_THRESHOLD_PARAM "angular_velocity_threshold_radps"
-#define WATCHDOG_EXPECTED_ESC_IDS_PARAM "expected_esc_ids"
-#define WATCHDOG_MISSION_TIMEOUT_S 480.0
-#define WATCHDOG_MISSION_TIMEOUT_PARAM "mission_timeout_s"
+struct Config {
+  std::vector<int64_t> ids{100, 101, 102, 103, 104, 105, 106, 107};
+  double esc_timeout = 10.0;
+  double imu_timeout = 1.0;  // New: do not silently accept a dead IMU.
+  double startup_grace = 10.0;
+  double warning_temperature = 70.0;
+  double error_temperature = 90.0;
+  double min_voltage = 12.0;
+  double max_roll = 45.0;
+  double max_pitch = 45.0;
+  double max_rate = 5.0;
+  double mission_timeout = 480.0;  // Zero disables this timer.
 
-// ESC fault bit masks.
-#define ESC_FAULT_OVER_TEMPERATURE (1U << 0)
-#define ESC_FAULT_BUS_OVER_CURRENT (1U << 1)
-#define ESC_FAULT_PHASE_OVER_CURRENT (1U << 2)
-#define ESC_FAULT_OVER_VOLTAGE (1U << 3)
-#define ESC_FAULT_UNDER_VOLTAGE (1U << 4)
-#define ESC_FAULT_EXCESS_VOLTAGE_RIPPLE (1U << 5)
-#define ESC_FAULT_SIGNAL_LOSS (1U << 6)
-#define ESC_FAULT_MOTOR_SATURATED (1U << 7)
-#define ESC_FAULT_MOTOR_OVER_TEMPERATURE (1U << 8)
-#define ESC_FAULT_RPM_LIMIT_REACHED (1U << 9)
-#define ESC_FAULT_ERROR_ACTIVE (1U << 10)
-#define ESC_FAULT_OUTPUT_SHORTED (1U << 11)
-#define ESC_FAULT_STARTUP_CHECK_FAILED (1U << 12)
+  void validate() const {
+    for (double v : {esc_timeout, imu_timeout, startup_grace,
+                     warning_temperature, error_temperature, min_voltage,
+                     max_roll, max_pitch, max_rate, mission_timeout}) {
+      if (!std::isfinite(v)) throw std::invalid_argument("Non-finite parameter");
+    }
+    if (esc_timeout <= 0 || imu_timeout <= 0 || startup_grace < 0 ||
+        warning_temperature >= error_temperature || min_voltage <= 0 ||
+        max_roll < 0 || max_roll > 180 || max_pitch < 0 || max_pitch > 90 ||
+        max_rate < 0 || mission_timeout < 0 || ids.empty()) {
+      throw std::invalid_argument("Invalid watchdog parameter range");
+    }
+    auto sorted = ids;
+    std::sort(sorted.begin(), sorted.end());
+    if (sorted.front() < 0 || sorted.back() > 255 ||
+        std::adjacent_find(sorted.begin(), sorted.end()) != sorted.end()) {
+      throw std::invalid_argument("ESC IDs must be unique and within 0..255");
+    }
+  }
+};
 
-// Choose which faults should affect watchdog system state.
-#define WATCHDOG_INTEREST_FAULT_MASK \
-    (ESC_FAULT_SIGNAL_LOSS | ESC_FAULT_ERROR_ACTIVE | ESC_FAULT_OUTPUT_SHORTED | ESC_FAULT_STARTUP_CHECK_FAILED)
+// Validates and converts IMU inputs without depending on ROS or tf2.
+// Assumes the orientation already describes the vehicle in the intended frame.
+inline std::string imuFault(const Config& c, double x, double y, double z,
+                            double w, double wx, double wy, double wz,
+                            bool orientation_available, bool rate_available) {
+  if (!orientation_available || !rate_available) return "IMU data unavailable";
+  for (double v : {x, y, z, w, wx, wy, wz}) {
+    if (!std::isfinite(v)) return "IMU contains NaN or infinity";
+  }
+  const double norm = std::hypot(std::hypot(x, y), std::hypot(z, w));
+  // Reject malformed quaternions, normalize small floating-point drift.
+  if (!std::isfinite(norm) || std::abs(norm - 1.0) > 0.01)
+    return "IMU quaternion is not approximately unit length";
+  x /= norm; y /= norm; z /= norm; w /= norm;
+  constexpr double rad_to_deg = 57.2957795130823208768;
+  const double roll = std::atan2(2 * (w*x + y*z), 1 - 2*(x*x + y*y));
+  const double pitch = std::asin(std::clamp(2 * (w*y - z*x), -1.0, 1.0));
+  if (std::abs(roll) * rad_to_deg > c.max_roll ||
+      std::abs(pitch) * rad_to_deg > c.max_pitch) return "IMU attitude limit";
+  if (std::max({std::abs(wx), std::abs(wy), std::abs(wz)}) > c.max_rate)
+    return "IMU angular velocity limit";
+  return {};
+}
 
-using namespace std::chrono_literals;
+class Core {
+ public:
+  struct ResetResult { bool success; std::string message; };
+  explicit Core(Config config, Time now)
+      : c_(std::move(config)), startup_(now), mission_start_(now) {
+    c_.validate();
+    for (auto id : c_.ids) esc_.emplace(id, Sample{});
+  }
+  const Config& config() const { return c_; }
+  bool expected(int64_t id) const { return esc_.count(id) != 0; }
+  bool latched() const { return latched_; }
+  const std::string& reason() const { return reason_; }
 
-Watchdog::Watchdog(std::string prefix)
-    : Node("watchdog"),
-      prefix_(std::move(prefix)),
-      system_in_error_(false),
-      imu_attitude_fault_(false),
-      imu_angular_velocity_fault_(false),
-      mission_timed_out_(false),
-      startup_time_(this->now()) {
-    const auto ensure_positive_param = [this](const char* name, const double value, const double fallback) {
-        if (value > 0.0) {
-            return value;
-        }
-        RCLCPP_WARN(this->get_logger(),
-                    "Invalid %s=%.3f. Falling back to default %.3f.",
-                    name,
-                    value,
-                    fallback);
-        return fallback;
+  void esc(int64_t id, double temperature, double voltage, Time now) {
+    if (!expected(id)) return;
+    // Check the OLD timestamps first so late recovery cannot hide a timeout.
+    tick(now);
+    std::string fault;
+    if (!std::isfinite(temperature) || !std::isfinite(voltage))
+      fault = "invalid telemetry";
+    else {
+      if (temperature > c_.error_temperature) fault += "over temperature; ";
+      if (voltage < c_.min_voltage) fault += "under voltage; ";
+    }
+    esc_.at(id) = Sample{now, std::move(fault)};
+    tick(now);
+  }
+
+  void imu(std::string fault, Time now) {
+    tick(now);
+    imu_ = Sample{now, std::move(fault)};
+    tick(now);
+  }
+
+  void tick(Time now) {
+    // Startup grace suppresses missing/stale trips only, never measured faults.
+    const auto fault = healthFault(now, age(now, startup_) >= c_.startup_grace);
+    if (!fault.empty()) trip(fault);
+    if (c_.mission_timeout > 0 && age(now, mission_start_) >= c_.mission_timeout)
+      trip("mission timeout");
+  }
+
+  std::string state(Time now) {
+    tick(now);
+    // Keep the original two-string wire protocol. ERROR during startup means
+    // not ready; it becomes latched only on a fault or expiration of grace.
+    return latched_ || !healthFault(now, true).empty() ? "ERROR" : "OK";
+  }
+
+  ResetResult reset(Time now) {
+    tick(now);
+    // Strict check: startup grace does NOT allow a reset with missing data.
+    const auto fault = healthFault(now, true);
+    if (!fault.empty()) return {false, "Reset refused: " + fault};
+    if (!latched_) return {true, "Already healthy; mission timer unchanged"};
+    latched_ = false;
+    reason_.clear();
+    mission_start_ = now;
+    // Keep all readings/timestamps and the ORIGINAL startup deadline.
+    return {true, "Watchdog reset; new mission timer started; motors not armed"};
+  }
+
+ private:
+  struct Sample {
+    std::optional<Time> received;
+    std::string fault;
+  };
+  std::string healthFault(Time now, bool require_fresh) const {
+    for (const auto& item : esc_) {
+      const auto& sample = item.second;
+      const std::string name = "ESC " + std::to_string(item.first) + ": ";
+      if (!sample.fault.empty()) return name + sample.fault;
+      if (require_fresh && (!sample.received ||
+          age(now, *sample.received) >= c_.esc_timeout)) return name + "missing/stale";
+    }
+    if (!imu_.fault.empty()) return imu_.fault;
+    if (require_fresh && (!imu_.received ||
+        age(now, *imu_.received) >= c_.imu_timeout)) return "IMU missing/stale";
+    return {};
+  }
+  void trip(const std::string& reason) {
+    if (!latched_) reason_ = reason; // Preserve the first trip for diagnosis.
+    latched_ = true;
+  }
+  Config c_;
+  Time startup_, mission_start_;
+  std::map<int64_t, Sample> esc_;
+  Sample imu_;
+  bool latched_ = false;
+  std::string reason_;
+};
+}  // namespace watchdog
+
+#ifdef WATCHDOG_SELF_TEST
+#include <cassert>
+#include <iostream>
+int main() {
+  using namespace watchdog;
+  const auto t = [](double s) {
+    return Time{} + std::chrono::duration_cast<Clock::duration>(
+        std::chrono::duration<double>(s));
+  };
+  Config c;
+  c.ids = {100, 101}; c.esc_timeout = 2; c.imu_timeout = 2;
+  c.startup_grace = 1; c.mission_timeout = 10;
+  auto feed = [&](Core& w, double s) {
+    w.esc(100, 30, 16, t(s)); w.esc(101, 30, 16, t(s)); w.imu({}, t(s));
+  };
+  Core w(c, t(0));
+  assert(w.state(t(0)) == "ERROR" && !w.latched());
+  assert(!w.reset(t(0)).success); // Never-seen sensors cannot be reset away.
+  feed(w, 0.1);
+  assert(w.state(t(0.1)) == "OK");
+  w.esc(100, 95, 16, t(0.2));
+  assert(w.latched() && !w.reset(t(0.2)).success);
+  feed(w, 0.3);
+  assert(w.state(t(0.3)) == "ERROR"); // Recovery alone does not clear latch.
+  assert(w.reset(t(0.3)).success && w.state(t(0.3)) == "OK");
+  w.tick(t(2.4));
+  assert(w.latched() && !w.reset(t(2.4)).success);
+  feed(w, 2.5);
+  assert(w.reset(t(2.5)).success);
+  w.imu("bad quaternion", t(2.6));
+  assert(!w.reset(t(2.6)).success);
+  feed(w, 2.7); assert(w.reset(t(2.7)).success);
+  w.esc(100, 30, 11, t(2.8)); assert(!w.reset(t(2.8)).success);
+  feed(w, 2.9); assert(w.reset(t(2.9)).success);
+  w.esc(100, std::numeric_limits<double>::quiet_NaN(), 16, t(3));
+  assert(!w.reset(t(3)).success);
+  feed(w, 3.1); assert(w.reset(t(3.1)).success);
+
+  Core missing(c, t(0));
+  missing.esc(100, 30, 16, t(0.1)); missing.imu({}, t(0.1));
+  missing.esc(255, 30, 16, t(0.1)); // Unexpected ID cannot satisfy ESC 101.
+  missing.tick(t(1)); assert(missing.latched());
+  assert(!missing.reset(t(1)).success);
+
+  Core dead_imu(c, t(0)); feed(dead_imu, 0.1);
+  dead_imu.esc(100, 30, 16, t(2)); dead_imu.esc(101, 30, 16, t(2));
+  dead_imu.tick(t(2.2));
+  assert(dead_imu.latched() && dead_imu.reason() == "IMU missing/stale");
+
+  Core late(c, t(0)); feed(late, 0.1); feed(late, 3);
+  assert(late.latched()); // Arrival before next timer tick still exposes gap.
+
+  Core mission(c, t(0)); feed(mission, 0.1);
+  for (int i = 1; i <= 9; ++i) feed(mission, i);
+  assert(mission.reset(t(9)).success); // Healthy reset must not extend deadline.
+  feed(mission, 10);
+  assert(mission.latched() && mission.reason() == "mission timeout");
+  assert(mission.reset(t(10)).success && mission.state(t(10)) == "OK");
+  for (int i = 11; i <= 19; ++i) feed(mission, i);
+  assert(!mission.latched());
+  feed(mission, 20); assert(mission.latched());
+  assert(mission.reset(t(20)).success);
+  mission.tick(t(22)); // Reset grants no new startup grace.
+  assert(mission.latched());
+
+  assert(imuFault(c, 0, 0, 0, 1, 0, 0, 0, true, true).empty());
+  assert(!imuFault(c, 0, 0, 0, 0, 0, 0, 0, true, true).empty());
+  assert(!imuFault(c, 0, 0, 0, 1, 6, 0, 0, true, true).empty());
+  assert(!imuFault(c, .5, 0, 0, std::sqrt(.75), 0, 0, 0, true, true).empty());
+  assert(!imuFault(c, 0, 0, 0, 1, 0, 0, 0, false, true).empty());
+  assert(!imuFault(c, 0, 0, 0, 1, 0, 0, 0, true, false).empty());
+  bool rejected = false;
+  try { Config bad = c; bad.ids.clear(); Core invalid(bad, t(0)); }
+  catch (const std::invalid_argument&) { rejected = true; }
+  assert(rejected);
+  rejected = false;
+  try { Config bad = c; bad.esc_timeout = std::numeric_limits<double>::infinity();
+        Core invalid(bad, t(0)); }
+  catch (const std::invalid_argument&) { rejected = true; }
+  assert(rejected);
+  std::cout << "All watchdog core assertions passed\n";
+}
+#else
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/imu.hpp>
+#include <std_msgs/msg/string.hpp>
+#include <std_srvs/srv/trigger.hpp>
+#include <tauv_msgs/msg/esc_telemetry.hpp>
+
+class ResettableWatchdog final : public rclcpp::Node {
+ public:
+  ResettableWatchdog() : Node("watchdog") {
+    watchdog::Config c;
+    c.ids = declare_parameter<std::vector<int64_t>>("expected_esc_ids", c.ids);
+    auto param = [this](const char* name, double& v) {
+      v = declare_parameter<double>(name, v);
     };
-
-    const auto ensure_non_negative_param = [this](const char* name, const double value, const double fallback) {
-        if (value >= 0.0) {
-            return value;
-        }
-        RCLCPP_WARN(this->get_logger(),
-                    "Invalid %s=%.3f. Falling back to default %.3f.",
-                    name,
-                    value,
-                    fallback);
-        return fallback;
-    };
-
-    // Configuration: topics, watchdog timing, and warning thresholds.
-    esc_topic_ = this->declare_parameter<std::string>(
-        WATCHDOG_ESC_TOPIC_PARAM,
-        WATCHDOG_ESC_TELEMETRY_TOPIC);
-    imu_topic_ = this->declare_parameter<std::string>(
-        WATCHDOG_IMU_TOPIC_PARAM,
-        prefix_ + WATCHDOG_IMU_TOPIC_SUFFIX);
-    system_state_topic_ = this->declare_parameter<std::string>(
-        WATCHDOG_SYSTEM_STATE_TOPIC_PARAM,
-        WATCHDOG_SYSTEM_STATE_TOPIC);
-    heartbeat_check_hz_ = ensure_positive_param(
-        WATCHDOG_HEARTBEAT_FREQUENCY_PARAM,
-        this->declare_parameter<double>(WATCHDOG_HEARTBEAT_FREQUENCY_PARAM, WATCHDOG_HEARTBEAT_CHECK_HZ),
-        WATCHDOG_HEARTBEAT_CHECK_HZ);
-    esc_timeout_s_ = ensure_positive_param(
-        WATCHDOG_ESC_TIMEOUT_PARAM,
-        this->declare_parameter<double>(WATCHDOG_ESC_TIMEOUT_PARAM, WATCHDOG_ESC_TIMEOUT_S),
-        WATCHDOG_ESC_TIMEOUT_S);
-    stale_startup_grace_s_ = ensure_non_negative_param(
-        WATCHDOG_STALE_STARTUP_GRACE_PARAM,
-        this->declare_parameter<double>(WATCHDOG_STALE_STARTUP_GRACE_PARAM, WATCHDOG_STALE_STARTUP_GRACE_S),
-        WATCHDOG_STALE_STARTUP_GRACE_S);
-    warning_temperature_c_ = this->declare_parameter<double>(
-        WATCHDOG_WARNING_TEMPERATURE_PARAM,
-        WATCHDOG_WARNING_TEMPERATURE_C);
-    error_temperature_c_ = this->declare_parameter<double>(
-        WATCHDOG_ERROR_TEMPERATURE_PARAM,
-        WATCHDOG_ERROR_TEMPERATURE_C);
-    error_voltage_v_ = this->declare_parameter<double>(
-        WATCHDOG_ERROR_VOLTAGE_PARAM,
-        WATCHDOG_ERROR_VOLTAGE_V);
-    roll_threshold_deg_ = ensure_non_negative_param(
-        WATCHDOG_ROLL_THRESHOLD_PARAM,
-        this->declare_parameter<double>(WATCHDOG_ROLL_THRESHOLD_PARAM, WATCHDOG_ERROR_ROLL_DEG),
-        WATCHDOG_ERROR_ROLL_DEG);
-    pitch_threshold_deg_ = ensure_non_negative_param(
-        WATCHDOG_PITCH_THRESHOLD_PARAM,
-        this->declare_parameter<double>(WATCHDOG_PITCH_THRESHOLD_PARAM, WATCHDOG_ERROR_PITCH_DEG),
-        WATCHDOG_ERROR_PITCH_DEG);
-    angular_velocity_threshold_radps_ = ensure_non_negative_param(
-        WATCHDOG_ANGULAR_VELOCITY_THRESHOLD_PARAM,
-        this->declare_parameter<double>(
-            WATCHDOG_ANGULAR_VELOCITY_THRESHOLD_PARAM,
-            WATCHDOG_ERROR_ANGULAR_VELOCITY_RADPS),
-        WATCHDOG_ERROR_ANGULAR_VELOCITY_RADPS);
-    mission_timeout_s_ = this->declare_parameter<double>(WATCHDOG_MISSION_TIMEOUT_PARAM, WATCHDOG_MISSION_TIMEOUT_S);
-
-    const std::vector<int64_t> default_expected_esc_ids = WATCHDOG_EXPECTED_ESC_IDS;
-    const auto expected_esc_ids_param = this->declare_parameter<std::vector<int64_t>>(
-        WATCHDOG_EXPECTED_ESC_IDS_PARAM,
-        default_expected_esc_ids);
-    expected_esc_ids_.clear();
-    expected_esc_ids_.reserve(expected_esc_ids_param.size());
-    for (const auto esc_id : expected_esc_ids_param) {
-        if (esc_id < 0 || esc_id > std::numeric_limits<uint8_t>::max()) {
-            RCLCPP_WARN(this->get_logger(),
-                        "Ignoring out-of-range ESC id in %s: %ld",
-                        WATCHDOG_EXPECTED_ESC_IDS_PARAM,
-                        esc_id);
-            continue;
-        }
-        expected_esc_ids_.push_back(static_cast<uint8_t>(esc_id));
-    }
-
-    esc_sub_ = this->create_subscription<tauv_msgs::msg::EscTelemetry>(
-        esc_topic_,
-        rclcpp::SensorDataQoS(),
-        std::bind(&Watchdog::escTelemetryCallback, this, std::placeholders::_1));
-
-    imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
-        imu_topic_,
-        rclcpp::SensorDataQoS(),
-        std::bind(&Watchdog::imuCallback, this, std::placeholders::_1));
-
-    system_state_pub_ = this->create_publisher<std_msgs::msg::String>(system_state_topic_, 10);
-
-    const auto timer_period = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::duration<double>(1.0 / std::max(heartbeat_check_hz_, 1e-3)));
-    heartbeat_timer_ = this->create_wall_timer(
-        timer_period,
-        std::bind(&Watchdog::heartbeatCheckCallback, this));
-
-    publishSystemState();
-
-    RCLCPP_INFO(this->get_logger(),
-                "Watchdog started. esc_topic=%s imu_topic=%s state_topic=%s timeout=%.2fs check_hz=%.2f expected_esc_count=%zu",
-                esc_topic_.c_str(),
-                imu_topic_.c_str(),
-                system_state_topic_.c_str(),
-                esc_timeout_s_,
-                heartbeat_check_hz_,
-                expected_esc_ids_.size());
-}
-
-void Watchdog::escTelemetryCallback(const tauv_msgs::msg::EscTelemetry::SharedPtr msg) {
-    // Telemetry ingestion: update freshness state and emit actionable alerts.
-    return;
-    // last_esc_telemetry_time_[msg->id] = this->now();
-
-    // if (stale_esc_ids_.erase(msg->id) > 0) {
-    //     RCLCPP_INFO(this->get_logger(), "ESC %u telemetry stream recovered", msg->id);
-    // }
-
-    // const bool temperature_fault = msg->temperature > error_temperature_c_;
-    // const bool voltage_fault = msg->voltage < error_voltage_v_;
-    // const bool has_fault = temperature_fault || voltage_fault;
-
-    // if (has_fault) {
-    //     escs_with_cared_faults_.insert(msg->id);
-    //     const char* fault_description = "OK";
-    //     if (temperature_fault && voltage_fault) {
-    //         fault_description = "Over Temperature + Under Voltage";
-    //     } else if (temperature_fault) {
-    //         fault_description = "Over Temperature";
-    //     } else if (voltage_fault) {
-    //         fault_description = "Under Voltage";
-    //     }
-
-    //     RCLCPP_ERROR_THROTTLE(this->get_logger(),
-    //                           *this->get_clock(),
-    //                           2000,
-    //                           "ESC %u faultDetect error: %s",
-    //                           msg->id,
-    //                           fault_description);
-
-    //     // Publish ERROR immediately on detection instead of waiting for the next heartbeat tick.
-    //     system_in_error_ = true;
-    //     std_msgs::msg::String msg_state;
-    //     msg_state.data = "ERROR";
-    //     system_state_pub_->publish(msg_state);
-    // } else {
-    //     escs_with_cared_faults_.erase(msg->id);
-    // }
-}
-
-void Watchdog::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg) {
-    // Attitude safety gate: derive roll/pitch from quaternion and enforce limits.
-    const tf2::Quaternion q(msg->orientation.x,
-                            msg->orientation.y,
-                            msg->orientation.z,
-                            msg->orientation.w);
-
-    double roll_rad = 0.0; 
-    double pitch_rad = 0.0;
-    double yaw_rad = 0.0;
-    tf2::Matrix3x3(q).getRPY(roll_rad, pitch_rad, yaw_rad);
-
-    const double roll_deg = std::abs(roll_rad) * 180.0 / M_PI;
-    const double pitch_deg = std::abs(pitch_rad) * 180.0 / M_PI;
-
-    const bool attitude_exceeds_threshold = roll_deg > roll_threshold_deg_ || pitch_deg > pitch_threshold_deg_;
-    const bool attitude_state_changed = attitude_exceeds_threshold != imu_attitude_fault_;
-    imu_attitude_fault_ = attitude_exceeds_threshold;
-
-    if (attitude_state_changed && imu_attitude_fault_) {
-        RCLCPP_ERROR(this->get_logger(),
-                     "IMU attitude limit exceeded: |roll|=%.2f deg (limit=%.2f), |pitch|=%.2f deg (limit=%.2f)",
-                     roll_deg,
-                     roll_threshold_deg_,
-                     pitch_deg,
-                     pitch_threshold_deg_);
-
-        // Publish ERROR immediately when attitude exceeds configured limits.
-        system_in_error_ = true;
-        std_msgs::msg::String msg_state;
-        msg_state.data = "ERROR";
-        system_state_pub_->publish(msg_state);
-    }
-
-    if (attitude_state_changed && !imu_attitude_fault_) {
-        RCLCPP_INFO(this->get_logger(),
-                    "IMU attitude returned within limits: |roll|=%.2f deg, |pitch|=%.2f deg",
-                    roll_deg,
-                    pitch_deg);
-    }
-
-    // Body-rate safety gate: monitor absolute angular velocity on all IMU axes.
-    const double omega_x_radps = std::abs(msg->angular_velocity.x);
-    const double omega_y_radps = std::abs(msg->angular_velocity.y);
-    const double omega_z_radps = std::abs(msg->angular_velocity.z);
-
-    const bool angular_velocity_exceeds_threshold =
-        omega_x_radps > angular_velocity_threshold_radps_ ||
-        omega_y_radps > angular_velocity_threshold_radps_ ||
-        omega_z_radps > angular_velocity_threshold_radps_;
-    const bool angular_velocity_state_changed = angular_velocity_exceeds_threshold != imu_angular_velocity_fault_;
-    imu_angular_velocity_fault_ = angular_velocity_exceeds_threshold;
-
-    if (angular_velocity_state_changed && imu_angular_velocity_fault_) {
-        RCLCPP_ERROR(this->get_logger(),
-                     "IMU angular velocity limit exceeded: |wx|=%.2f rad/s, |wy|=%.2f rad/s, |wz|=%.2f rad/s (limit=%.2f)",
-                     omega_x_radps,
-                     omega_y_radps,
-                     omega_z_radps,
-                     angular_velocity_threshold_radps_);
-
-        // Publish ERROR immediately when any body-rate exceeds configured limits.
-        system_in_error_ = true;
-        std_msgs::msg::String msg_state;
-        msg_state.data = "ERROR";
-        system_state_pub_->publish(msg_state);
-    }
-
-    if (angular_velocity_state_changed && !imu_angular_velocity_fault_) {
-        RCLCPP_INFO(this->get_logger(),
-                    "IMU angular velocity returned within limits: |wx|=%.2f rad/s, |wy|=%.2f rad/s, |wz|=%.2f rad/s",
-                    omega_x_radps,
-                    omega_y_radps,
-                    omega_z_radps);
-    }
-}
-
-void Watchdog::heartbeatCheckCallback() {
-    // Freshness monitoring: each monitored ESC must publish at least once per timeout.
-    const auto now = this->now();
-
-    if ((now - startup_time_).seconds() >= stale_startup_grace_s_) {
-        for (const uint8_t esc_id : monitoredEscIds()) {
-            const auto it = last_esc_telemetry_time_.find(esc_id);
-            // stale if never seen, or if last seen is too old.
-            const bool stale = it == last_esc_telemetry_time_.end() || (now - it->second).seconds() > esc_timeout_s_;
-
-            // log error if this is first time we have seen it stale, but do not log again until it recovers and goes stale again.
-            if (stale && stale_esc_ids_.insert(esc_id).second) {
-                RCLCPP_WARN(this->get_logger(),
-                            "ESC %u telemetry stale or missing (timeout: %.2fs)",
-                            esc_id,
-                            esc_timeout_s_);
-            }
-        }
-    }
-
-    // Mission timeout: force ERROR once the configured deadline elapses.
-    if (mission_timeout_s_ > 0.0 && !mission_timed_out_ &&
-        (now - startup_time_).seconds() >= mission_timeout_s_) {
-        mission_timed_out_ = true;
-        system_in_error_ = true;
-        RCLCPP_ERROR(this->get_logger(),
-                     "Mission timeout of %.1f s elapsed — watchdog latched to ERROR",
-                     mission_timeout_s_);
-    }
-
-    // Heartbeat output: publish watchdog state every tick.
-    publishSystemState();
-}
-
-std::vector<uint8_t> Watchdog::monitoredEscIds() const {
-    if (!expected_esc_ids_.empty()) {
-        return expected_esc_ids_;
-    }
-
-    std::vector<uint8_t> observed_ids;
-    observed_ids.reserve(last_esc_telemetry_time_.size());
-    for (const auto& [esc_id, _] : last_esc_telemetry_time_) {
-        (void)_;
-        observed_ids.push_back(esc_id);
-    }
-    return observed_ids;
-}
-
-void Watchdog::publishSystemState() {
-    const bool has_error_now =
-        !escs_with_cared_faults_.empty() || !stale_esc_ids_.empty() || imu_attitude_fault_ || imu_angular_velocity_fault_;
-
-    // Once an error is observed, latch watchdog output in ERROR until restart.
-    const bool previous_state = system_in_error_;
-    system_in_error_ = system_in_error_ || has_error_now;
-    const bool state_changed = system_in_error_ != previous_state;
-
-    std_msgs::msg::String msg;
-    msg.data = system_in_error_ ? "ERROR" : "OK";
-    system_state_pub_->publish(msg);
-
-    if (state_changed) {
-        RCLCPP_INFO(this->get_logger(),
-                    "Watchdog system state changed: %s",
-                    msg.data.c_str());
-    }
-}
+    param("esc_timeout_s", c.esc_timeout);
+    param("imu_timeout_s", c.imu_timeout);
+    param("stale_startup_grace_s", c.startup_grace);
+    param("warning_temperature_c", c.warning_temperature);
+    param("error_temperature_c", c.error_temperature);
+    param("error_voltage_v", c.min_voltage);
+    param("roll_threshold_deg", c.max_roll);
+    param("pitch_threshold_deg", c.max_pitch);
+    param("angular_velocity_threshold_radps", c.max_rate);
+    param("mission_timeout_s", c.mission_timeout);
+    c.validate();
+    const double hz = declare_parameter<double>("heartbeat_frequency_hz", 2.0);
+    if (!std::isfinite(hz) || hz < 0.1 || hz > 1000.0)
+      throw std::invalid_argument("heartbeat_frequency_hz must be in 0.1..1000");
+    core_ = std::make_unique<watchdog::Core>(c, watchdog::Clock::now());
+    const auto esc_topic = declare_parameter<std::string>("esc_topic", "/esc_telemetry");
+    const auto imu_topic = declare_parameter<std::string>("imu_topic", "os/sensors/imu_xsens");
+    const auto state_topic = declare_parameter<std::string>("system_state_topic", "watchdog/system_state");
+    const auto reset_service = declare_parameter<std::string>("reset_service", "watchdog/reset");
+    pub_ = create_publisher<std_msgs::msg::String>(state_topic, 10);
+    // All callbacks use the default mutually exclusive callback group.
+    esc_sub_ = create_subscription<tauv_msgs::msg::EscTelemetry>(
+        esc_topic, rclcpp::SensorDataQoS(),
+        [this](tauv_msgs::msg::EscTelemetry::ConstSharedPtr m) {
+          const auto now = watchdog::Clock::now();
+          core_->esc(m->id, m->temperature, m->voltage, now);
+          if (core_->expected(m->id) && std::isfinite(m->temperature) &&
+              m->temperature > core_->config().warning_temperature) {
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                "ESC %u temperature %.1f C", static_cast<unsigned>(m->id),
+                static_cast<double>(m->temperature));
+          }
+          publish(now);
+        });
+    imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
+        imu_topic, rclcpp::SensorDataQoS(),
+        [this](sensor_msgs::msg::Imu::ConstSharedPtr m) {
+          const auto now = watchdog::Clock::now();
+          core_->imu(watchdog::imuFault(core_->config(), m->orientation.x,
+              m->orientation.y, m->orientation.z, m->orientation.w,
+              m->angular_velocity.x, m->angular_velocity.y, m->angular_velocity.z,
+              m->orientation_covariance[0] != -1,
+              m->angular_velocity_covariance[0] != -1), now);
+          publish(now);
+        });
+    reset_ = create_service<std_srvs::srv::Trigger>(reset_service,
+        [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+               std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+          const auto now = watchdog::Clock::now();
+          const auto result = core_->reset(now);
+          response->success = result.success;
+          response->message = result.message;
+          RCLCPP_INFO(get_logger(), "%s", result.message.c_str());
+          publish(now);
+        });
+    const auto period = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::duration<double>(1.0 / hz));
+    timer_ = create_wall_timer(period, [this] { publish(watchdog::Clock::now()); });
+    publish(watchdog::Clock::now());
+  }
+ private:
+  void publish(watchdog::Time now) {
+    std_msgs::msg::String message;
+    message.data = core_->state(now);
+    if (core_->latched() && !was_latched_)
+      RCLCPP_ERROR(get_logger(), "Watchdog latched: %s", core_->reason().c_str());
+    was_latched_ = core_->latched();
+    pub_->publish(message);
+  }
+  std::unique_ptr<watchdog::Core> core_;
+  bool was_latched_ = false;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+  rclcpp::Subscription<tauv_msgs::msg::EscTelemetry>::SharedPtr esc_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_;
+  rclcpp::TimerBase::SharedPtr timer_;
+};
 
 int main(int argc, char** argv) {
-    rclcpp::init(argc, argv);
-    auto node = std::make_shared<Watchdog>("os");
-    rclcpp::spin(node);
-    rclcpp::shutdown();
-    return 0;
+  rclcpp::init(argc, argv);
+  int result = 0;
+  try { rclcpp::spin(std::make_shared<ResettableWatchdog>()); }
+  catch (const std::exception& e) {
+    RCLCPP_FATAL(rclcpp::get_logger("watchdog"), "%s", e.what()); result = 1;
+  }
+  rclcpp::shutdown();
+  return result;
 }
+#endif
