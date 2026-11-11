@@ -1,0 +1,26 @@
+RESETTING WATCHDOG:
+ros2 service call /watchdog/reset std_srvs/srv/Trigger "{}"
+- only works when sensors have fresh readings
+- restarts mission timer but doesn't rearm motors
+
+CHANGES:
+watchdog.cpp — connects the watchdog to ROS. It receives ESC and IMU data, publishes continue or kill, and handles the reset service. Reset succeeds only when the required sensors are fresh and healthy.
+
+watchdog.h — contains the watchdog’s decision-making logic. It tracks sensor health, timeouts, the mission timer, and latched faults. Its declarations now match the implementation in watchdog.cpp.
+
+can_driver.py — enforces the watchdog’s decisions. A kill or missing heartbeat disarms the ESCs and sends zero commands. Watchdog recovery no longer permanently disables BIGARM, and a healthy message alone cannot arm motors. Battery protections remain separate. The extra disarmed-then-armed handshake is optional and disabled by default.
+
+Uses std_srvs:
+sudo apt-get update
+sudo apt-get install ros-humble-std-srvs
+
+self test:
+cd /tauv-mono/ros_ws/src/tauv_core/tauv_watchdogs
+
+g++ -std=c++17 -Wall -Wextra -Werror \
+  -DWATCHDOG_SELF_TEST \
+  -Iinclude \
+  src/watchdog.cpp \
+  -o /tmp/watchdog_test
+
+/tmp/watchdog_test
