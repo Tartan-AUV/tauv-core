@@ -201,7 +201,7 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='base_link_to_imu_fog_gyro',
             arguments=['0.06184000', '0.1', '0.06922651',
-                    '0.69843', '0.02752', '0.71476', '-0.02357',
+                    '0.70579', '0.02639', '0.70750', '-0.02470',  # measured 2026-10-29, see ekf_tests/fog_tf_correction.json
                     'os/base_link', 'imu_link_fog_gyro'],
             output='screen'
         ),
@@ -210,7 +210,7 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='base_link_to_imu_fog_accel_x',
             arguments=['0.09534000', '0.12620000', '0.06972651',
-                    '0.69843', '0.02752', '0.71476', '-0.02357',
+                    '0.70579', '0.02639', '0.70750', '-0.02470',  # measured 2026-10-29, see ekf_tests/fog_tf_correction.json
                     'os/base_link', 'imu_link_fog_accel_x'],
             output='screen'
         ),
@@ -219,7 +219,7 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='base_link_to_imu_fog_accel_y',
             arguments=['0.09894000', '0.11169440', '0.04362071',
-                    '0.69843', '0.02752', '0.71476', '-0.02357',
+                    '0.70579', '0.02639', '0.70750', '-0.02470',  # measured 2026-10-29, see ekf_tests/fog_tf_correction.json
                     'os/base_link', 'imu_link_fog_accel_y'],
             output='screen'
         ),
@@ -228,7 +228,7 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='base_link_to_imu_fog_accel_z',
             arguments=['0.10684000', '0.10049400', '0.04352071',
-                    '0.69843', '0.02752', '0.71476', '-0.02357',
+                    '0.70579', '0.02639', '0.70750', '-0.02470',  # measured 2026-10-29, see ekf_tests/fog_tf_correction.json
                     'os/base_link', 'imu_link_fog_accel_z'],
             output='screen'
         ),
