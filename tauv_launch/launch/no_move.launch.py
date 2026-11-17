@@ -144,7 +144,9 @@ def generate_launch_description():
             name='dvl_a50',
             output='screen',
             parameters=[{'dvl_ip_address': '192.168.8.114',
-                         'acoustic_enabled': False}]
+                         'acoustic_enabled': False,
+                         # stamp at the ping (time of validity), ~110 ms earlier than receive time; pairs with smooth_lagged_data
+                         'stamp_at_ping': True}]
         ),
 
         Node(

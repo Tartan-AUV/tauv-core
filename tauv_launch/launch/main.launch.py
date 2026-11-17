@@ -76,7 +76,7 @@ def generate_launch_description():
                     name='kvh_node',
                     # Average the gyro for 10 s at startup (sub must be still) and subtract it:
                     # removes the FOG bias + Earth rate. Bench 2026-10-29: heading drift ~0.1 deg/h.
-                    parameters=[{'startup_bias_seconds': 10.0,
+                    parameters=[{'startup_bias_seconds': 20.0,
                                  # saved after the first measurement; restarts within 8 h reuse it
                                  'bias_file': '/data/fog_startup_bias.txt'}],
                     extra_arguments=[{'use_intra_process_comms': True}]
@@ -144,7 +144,9 @@ def generate_launch_description():
             name='dvl_a50',
             output='screen',
             parameters=[{'dvl_ip_address': '192.168.8.114',
-                         'acoustic_enabled': True}]
+                         'acoustic_enabled': True,
+                         # stamp at the ping (time of validity), ~110 ms earlier than receive time; pairs with smooth_lagged_data
+                         'stamp_at_ping': True}]
         ),
 
         Node(
@@ -252,13 +254,13 @@ def generate_launch_description():
             output='screen',
         ),
 
-        Node(
-            package='tauv_mission',
-            executable='mission_planner',
-            name='mission_planner',
-            parameters=[{'mission_file': 'D.json'}],
-            output='screen',
-        ),
+        # Node(
+        #     package='tauv_mission',
+        #     executable='mission_planner',
+        #     name='mission_planner',
+        #     parameters=[{'mission_file': 'D.json'}],
+        #     output='screen',
+        # ),
 
         TimerAction(
             period=5.0,
