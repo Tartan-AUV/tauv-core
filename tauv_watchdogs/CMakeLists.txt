@@ -12,6 +12,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(tauv_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(tf2 REQUIRED)
+find_package(std_srvs REQUIRED)
 
 # watchdog executable
 add_executable(watchdog
@@ -22,6 +23,7 @@ target_include_directories(watchdog PUBLIC
     $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
 )
 target_compile_features(watchdog PUBLIC c_std_99 cxx_std_20)
+target_compile_definitions(watchdog PRIVATE WATCHDOG_STANDALONE)
 
 ament_target_dependencies(watchdog
     rclcpp
@@ -29,6 +31,7 @@ ament_target_dependencies(watchdog
     std_msgs
     sensor_msgs
     tf2
+    std_srvs
 )
 
 install(TARGETS

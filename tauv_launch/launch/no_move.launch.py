@@ -39,9 +39,9 @@ def generate_launch_description():
         'imu_topic': 'os/sensors/imu_xsens',
         'system_state_topic': 'watchdog/system_state',
         'heartbeat_frequency_hz': 1.0,
-        'mission_timeout_s':480,
+        'mission_timeout_s': 480.0,
         'esc_timeout_s': 1.0,
-        'stale_startup_grace_s': 5.0,
+        'stale_startup_grace_s': 15.0,
         'warning_temperature_c': 70.0,
         'error_temperature_c': 90.0,
         'error_voltage_v': 12.0,
@@ -110,22 +110,22 @@ def generate_launch_description():
                 'startup_task': '',
             }]
         ),
-        # Node(
-        #     package='tauv_dronecan',
-        #     executable='can_driver',
-        #     name='dronecan',
-        #     output='screen',
-        #     parameters=[{
-        #         'interface': 'can1',
-        #         'node_id': 12,
-        #         'bitrate': 1000000,
-        #         'esc_count': 8,
-        #         'command_rate_hz': 100.0,
-        #         'discovery_time_sec': 15.0,
-        #         'dna_db_path': dronecan_db_path,
-        #         'BIGARM':True
-        #     }]
-        # ),
+        Node(
+            package='tauv_dronecan',
+            executable='can_driver',
+            name='dronecan',
+            output='screen',
+            parameters=[{
+                'interface': 'can1',
+                'node_id': 12,
+                'bitrate': 1000000,
+                'esc_count': 8,
+                'command_rate_hz': 100.0,
+                'discovery_time_sec': 15.0,
+                'dna_db_path': dronecan_db_path,
+                'BIGARM':True
+            }]
+        ),
         Node(
             package='xsens_mti_ros2_driver',
             executable='xsens_mti_node',
@@ -160,13 +160,13 @@ def generate_launch_description():
             output='screen',
         ),
         
-        # Node(
-        #     package="tauv_watchdogs",
-        #     executable="watchdog",
-        #     name="watchdog",
-        #     output="screen",
-        #     parameters=[watchdog_params]
-        # ),
+        Node(
+            package="tauv_watchdogs",
+            executable="watchdog",
+            name="watchdog",
+            output="screen",
+            parameters=[watchdog_params]
+        ),
 
         # Node(package="tauv_repackagers", executable="imu_converter", name="imu_converter", output="screen"),
         # Node(package="tauv_repackagers", executable="depth_converter", name="depth_converter", output="screen"),
