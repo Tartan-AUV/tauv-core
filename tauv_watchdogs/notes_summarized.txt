@@ -4,7 +4,7 @@ ros2 service call /watchdog/reset std_srvs/srv/Trigger "{}"
 - restarts mission timer but doesn't rearm motors
 
 CHANGES:
-watchdog.cpp — connects the watchdog to ROS. It receives ESC and IMU data, publishes continue or kill, and handles the reset service. Reset succeeds only when the required sensors are fresh and healthy.
+watchdog.cpp — connects the watchdog to ROS. It receives ESC and filtered odometry data, publishes continue or kill, and handles the reset service. Reset succeeds only when the required data is fresh and healthy.
 
 watchdog.h — contains the watchdog’s decision-making logic. It tracks sensor health, timeouts, the mission timer, and latched faults. Its declarations now match the implementation in watchdog.cpp.
 

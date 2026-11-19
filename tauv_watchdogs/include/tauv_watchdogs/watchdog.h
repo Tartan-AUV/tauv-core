@@ -23,7 +23,7 @@ inline double age(Time now, Time then) {
 struct Config {
   std::vector<int64_t> ids{100, 101, 102, 103, 104, 105, 106, 107};
   double esc_timeout = 10.0;
-  double imu_timeout = 1.0;  // New: do not silently accept a dead IMU.
+  double odometry_timeout = 1.0;
   double startup_grace = 10.0;
   double warning_temperature = 70.0;
   double error_temperature = 90.0;
@@ -34,12 +34,12 @@ struct Config {
   double mission_timeout = 480.0;  // Zero disables this timer.
 
   void validate() const {
-    for (double v : {esc_timeout, imu_timeout, startup_grace,
+    for (double v : {esc_timeout, odometry_timeout, startup_grace,
                      warning_temperature, error_temperature, min_voltage,
                      max_roll, max_pitch, max_rate, mission_timeout}) {
       if (!std::isfinite(v)) throw std::invalid_argument("Non-finite parameter");
     }
-    if (esc_timeout <= 0 || imu_timeout <= 0 || startup_grace < 0 ||
+    if (esc_timeout <= 0 || odometry_timeout <= 0 || startup_grace < 0 ||
         warning_temperature >= error_temperature || min_voltage <= 0 ||
         max_roll < 0 || max_roll > 180 || max_pitch < 0 || max_pitch > 90 ||
         max_rate < 0 || mission_timeout < 0 || ids.empty()) {
@@ -54,27 +54,24 @@ struct Config {
   }
 };
 
-// Validates and converts IMU inputs without depending on ROS or tf2.
-// Assumes the orientation already describes the vehicle in the intended frame.
-inline std::string imuFault(const Config& c, double x, double y, double z,
-                            double w, double wx, double wy, double wz,
-                            bool orientation_available, bool rate_available) {
-  if (!orientation_available || !rate_available) return "IMU data unavailable";
+// Validates filtered odometry attitude and angular velocity without depending on ROS or tf2.
+inline std::string odometryFault(const Config& c, double x, double y, double z,
+                                 double w, double wx, double wy, double wz) {
   for (double v : {x, y, z, w, wx, wy, wz}) {
-    if (!std::isfinite(v)) return "IMU contains NaN or infinity";
+    if (!std::isfinite(v)) return "Odometry contains NaN or infinity";
   }
   const double norm = std::hypot(std::hypot(x, y), std::hypot(z, w));
   // Reject malformed quaternions, normalize small floating-point drift.
   if (!std::isfinite(norm) || std::abs(norm - 1.0) > 0.01)
-    return "IMU quaternion is not approximately unit length";
+    return "Odometry quaternion is not approximately unit length";
   x /= norm; y /= norm; z /= norm; w /= norm;
   constexpr double rad_to_deg = 57.2957795130823208768;
   const double roll = std::atan2(2 * (w*x + y*z), 1 - 2*(x*x + y*y));
   const double pitch = std::asin(std::clamp(2 * (w*y - z*x), -1.0, 1.0));
   if (std::abs(roll) * rad_to_deg > c.max_roll ||
-      std::abs(pitch) * rad_to_deg > c.max_pitch) return "IMU attitude limit";
+      std::abs(pitch) * rad_to_deg > c.max_pitch) return "Odometry attitude limit";
   if (std::max({std::abs(wx), std::abs(wy), std::abs(wz)}) > c.max_rate)
-    return "IMU angular velocity limit";
+    return "Odometry angular velocity limit";
   return {};
 }
 
@@ -106,9 +103,9 @@ class Core {
     tick(now);
   }
 
-  void imu(std::string fault, Time now) {
+  void odometry(std::string fault, Time now) {
     tick(now);
-    imu_ = Sample{now, std::move(fault)};
+    odometry_ = Sample{now, std::move(fault)};
     tick(now);
   }
 
@@ -153,9 +150,10 @@ class Core {
       if (require_fresh && (!sample.received ||
           age(now, *sample.received) >= c_.esc_timeout)) return name + "missing/stale";
     }
-    if (!imu_.fault.empty()) return imu_.fault;
-    if (require_fresh && (!imu_.received ||
-        age(now, *imu_.received) >= c_.imu_timeout)) return "IMU missing/stale";
+    if (!odometry_.fault.empty()) return odometry_.fault;
+    if (require_fresh && (!odometry_.received ||
+        age(now, *odometry_.received) >= c_.odometry_timeout))
+      return "Odometry missing/stale";
     return {};
   }
   void trip(const std::string& reason) {
@@ -165,7 +163,7 @@ class Core {
   Config c_;
   Time startup_, mission_start_;
   std::map<int64_t, Sample> esc_;
-  Sample imu_;
+  Sample odometry_;
   bool latched_ = false;
   std::string reason_;
 };
@@ -174,7 +172,7 @@ class Core {
 
 #ifndef WATCHDOG_SELF_TEST
 #include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/imu.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <tauv_msgs/msg/esc_telemetry.hpp>
@@ -190,7 +188,7 @@ class Watchdog : public rclcpp::Node {
   bool was_latched_ = false;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
   rclcpp::Subscription<tauv_msgs::msg::EscTelemetry>::SharedPtr esc_sub_;
-  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_sub_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_;
   rclcpp::TimerBase::SharedPtr timer_;
 };

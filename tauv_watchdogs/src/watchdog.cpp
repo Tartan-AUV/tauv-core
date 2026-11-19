@@ -13,10 +13,10 @@ int main() {
         std::chrono::duration<double>(s));
   };
   Config c;
-  c.ids = {100, 101}; c.esc_timeout = 2; c.imu_timeout = 2;
+  c.ids = {100, 101}; c.esc_timeout = 2; c.odometry_timeout = 2;
   c.startup_grace = 1; c.mission_timeout = 10;
   auto feed = [&](Core& w, double s) {
-    w.esc(100, 30, 16, t(s)); w.esc(101, 30, 16, t(s)); w.imu({}, t(s));
+    w.esc(100, 30, 16, t(s)); w.esc(101, 30, 16, t(s)); w.odometry({}, t(s));
   };
   Core w(c, t(0));
   assert(w.state(t(0)) == "kill" && !w.latched());
@@ -32,7 +32,7 @@ int main() {
   assert(w.latched() && !w.reset(t(2.4)).success);
   feed(w, 2.5);
   assert(w.reset(t(2.5)).success);
-  w.imu("bad quaternion", t(2.6));
+  w.odometry("bad quaternion", t(2.6));
   assert(!w.reset(t(2.6)).success);
   feed(w, 2.7); assert(w.reset(t(2.7)).success);
   w.esc(100, 30, 11, t(2.8)); assert(!w.reset(t(2.8)).success);
@@ -42,15 +42,15 @@ int main() {
   feed(w, 3.1); assert(w.reset(t(3.1)).success);
 
   Core missing(c, t(0));
-  missing.esc(100, 30, 16, t(0.1)); missing.imu({}, t(0.1));
+  missing.esc(100, 30, 16, t(0.1)); missing.odometry({}, t(0.1));
   missing.esc(255, 30, 16, t(0.1)); // Unexpected ID cannot satisfy ESC 101.
   missing.tick(t(1)); assert(missing.latched());
   assert(!missing.reset(t(1)).success);
 
-  Core dead_imu(c, t(0)); feed(dead_imu, 0.1);
-  dead_imu.esc(100, 30, 16, t(2)); dead_imu.esc(101, 30, 16, t(2));
-  dead_imu.tick(t(2.2));
-  assert(dead_imu.latched() && dead_imu.reason() == "IMU missing/stale");
+  Core dead_odometry(c, t(0)); feed(dead_odometry, 0.1);
+  dead_odometry.esc(100, 30, 16, t(2)); dead_odometry.esc(101, 30, 16, t(2));
+  dead_odometry.tick(t(2.2));
+  assert(dead_odometry.latched() && dead_odometry.reason() == "Odometry missing/stale");
 
   Core late(c, t(0)); feed(late, 0.1); feed(late, 3);
   assert(late.latched()); // Arrival before next timer tick still exposes gap.
@@ -68,12 +68,11 @@ int main() {
   mission.tick(t(22)); // Reset grants no new startup grace.
   assert(mission.latched());
 
-  assert(imuFault(c, 0, 0, 0, 1, 0, 0, 0, true, true).empty());
-  assert(!imuFault(c, 0, 0, 0, 0, 0, 0, 0, true, true).empty());
-  assert(!imuFault(c, 0, 0, 0, 1, 6, 0, 0, true, true).empty());
-  assert(!imuFault(c, .5, 0, 0, std::sqrt(.75), 0, 0, 0, true, true).empty());
-  assert(!imuFault(c, 0, 0, 0, 1, 0, 0, 0, false, true).empty());
-  assert(!imuFault(c, 0, 0, 0, 1, 0, 0, 0, true, false).empty());
+  assert(odometryFault(c, 0, 0, 0, 1, 0, 0, 0).empty());
+  assert(!odometryFault(c, 0, 0, 0, 0, 0, 0, 0).empty());
+  assert(!odometryFault(c, 0, 0, 0, 1, 6, 0, 0).empty());
+  assert(!odometryFault(c, .5, 0, 0, std::sqrt(.75), 0, 0, 0).empty());
+  assert(!odometryFault(c, 0, 0, 0, 1, std::numeric_limits<double>::quiet_NaN(), 0, 0).empty());
   bool rejected = false;
   try { Config bad = c; bad.ids.clear(); Core invalid(bad, t(0)); }
   catch (const std::invalid_argument&) { rejected = true; }
@@ -94,7 +93,7 @@ Watchdog::Watchdog(std::string prefix) : Node("watchdog") {
       v = declare_parameter<double>(name, v);
     };
     param("esc_timeout_s", c.esc_timeout);
-    param("imu_timeout_s", c.imu_timeout);
+    param("odometry_timeout_s", c.odometry_timeout);
     param("stale_startup_grace_s", c.startup_grace);
     param("warning_temperature_c", c.warning_temperature);
     param("error_temperature_c", c.error_temperature);
@@ -109,7 +108,8 @@ Watchdog::Watchdog(std::string prefix) : Node("watchdog") {
       throw std::invalid_argument("heartbeat_frequency_hz must be in 0.1..1000");
     core_ = std::make_unique<watchdog::Core>(c, watchdog::Clock::now());
     const auto esc_topic = declare_parameter<std::string>("esc_topic", "esc_telemetry");
-    const auto imu_topic = declare_parameter<std::string>("imu_topic", "os/sensors/imu_xsens");
+    const auto odometry_topic = declare_parameter<std::string>(
+        "odometry_topic", "/odometry/filtered");
     const auto state_topic = declare_parameter<std::string>("system_state_topic", "watchdog/system_state");
     const auto reset_service = declare_parameter<std::string>("reset_service", "watchdog/reset");
     pub_ = create_publisher<std_msgs::msg::String>(state_topic, rclcpp::QoS(1).reliable().durability_volatile());
@@ -127,15 +127,15 @@ Watchdog::Watchdog(std::string prefix) : Node("watchdog") {
           }
           publish(now);
         });
-    imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
-        imu_topic, rclcpp::SensorDataQoS(),
-        [this](sensor_msgs::msg::Imu::ConstSharedPtr m) {
+    odometry_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+        odometry_topic, rclcpp::SensorDataQoS(),
+        [this](nav_msgs::msg::Odometry::ConstSharedPtr m) {
           const auto now = watchdog::Clock::now();
-          core_->imu(watchdog::imuFault(core_->config(), m->orientation.x,
-              m->orientation.y, m->orientation.z, m->orientation.w,
-              m->angular_velocity.x, m->angular_velocity.y, m->angular_velocity.z,
-              m->orientation_covariance[0] != -1,
-              m->angular_velocity_covariance[0] != -1), now);
+          core_->odometry(watchdog::odometryFault(core_->config(),
+              m->pose.pose.orientation.x, m->pose.pose.orientation.y,
+              m->pose.pose.orientation.z, m->pose.pose.orientation.w,
+              m->twist.twist.angular.x, m->twist.twist.angular.y,
+              m->twist.twist.angular.z), now);
           publish(now);
         });
     reset_ = create_service<std_srvs::srv::Trigger>(reset_service,

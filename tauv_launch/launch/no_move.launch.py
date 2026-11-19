@@ -36,7 +36,7 @@ def generate_launch_description():
 
     watchdog_params = {
         'esc_topic': '/esc_telemetry',
-        'imu_topic': 'os/sensors/imu_xsens',
+        'odometry_topic': '/odometry/filtered',
         'system_state_topic': 'watchdog/system_state',
         'heartbeat_frequency_hz': 1.0,
         'mission_timeout_s': 480.0,

@@ -8,7 +8,7 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(tauv_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(tf2 REQUIRED)
@@ -29,7 +29,7 @@ ament_target_dependencies(watchdog
     rclcpp
     tauv_msgs
     std_msgs
-    sensor_msgs
+    nav_msgs
     tf2
     std_srvs
 )
